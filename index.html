@@ -272,7 +272,10 @@ body { touch-action: pan-y pinch-zoom; }
 .sheet input:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
 .lg-msg { margin: 2px 0; min-height: 1.2em; font-size: 0.9rem; color: var(--neg); }
 .lg-msg.ok { color: var(--pos); }
-.lg-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.lg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.lg-row .btn { width: 100%; text-align: center; white-space: nowrap; }
+.lg-row #lgX { grid-column: 1 / -1; }
+.chips-lab { font-size: 0.8rem; color: var(--muted); align-self: center; }
 .lg-note { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
 </style>
 
@@ -351,7 +354,7 @@ body { touch-action: pan-y pinch-zoom; }
         <span class="msg" id="bkMsg">Salva un file con tutte le partite (mandalo su WhatsApp o Drive). Con "Importa" lo ricarichi, anche su un altro telefono.</span>
       </div>
     </div>
-      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 18</p>
+      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 19</p>
   </section>
 </div>
 
@@ -835,6 +838,14 @@ async function tokenFor(key) {
   id.it = j.id_token; id.rt = j.refresh_token || id.rt; id.exp = Date.now() + (Number(j.expires_in) || 3600) * 1000; delete id.bad; saveIds();
   return id.it;
 }
+function placeMe() {
+  if (!me || !ids[me] || ids[me].bad) return false;
+  const live = state.players.slice(0, state.n);
+  if (live.some(p => p.pk === me)) return false;
+  const i = live.findIndex(p => !p.pk && (!(p.name || "").trim() || /^Giocatore \d$/.test(p.name.trim())));
+  if (i < 0) return false;
+  state.players[i].pk = me; state.players[i].name = ids[me].name; return true;
+}
 function forgetId(key) { delete ids[key]; if (me === key) me = null; saveIds(); }
 
 /* login sheet */
@@ -852,7 +863,7 @@ async function lgRun(fn) {
   if (pw.length < 6) { lgMsg.textContent = "La password deve avere almeno 6 caratteri."; return; }
   const btns = lgModal.querySelectorAll("button"); btns.forEach(b => b.disabled = true);
   lgMsg.className = "lg-msg ok"; lgMsg.textContent = "Controllo…";
-  try { const key = await fn(name, pw); const cb = lgDone; closeLogin(); if (cb) cb(key); renderAcct(); syncNow(); }
+  try { const key = await fn(name, pw); const cb = lgDone; closeLogin(); if (cb) cb(key); if (placeMe()) update(); renderAcct(); syncNow(); }
   catch (e) { lgMsg.className = "lg-msg"; lgMsg.textContent = authMsg(e); }
   finally { btns.forEach(b => b.disabled = false); }
 }
@@ -873,14 +884,14 @@ function renderChips() {
   pnameIn.readOnly = !!p.pk;
   st.innerHTML = p.pk
     ? `<span class="ok">✓ Giocatore registrato</span><button type="button" class="linkbtn" id="unpick">Cambia giocatore</button>`
-    : `<span>Ospite</span><button type="button" class="linkbtn" id="useReg">Usa un giocatore registrato</button>`;
+    : `<span>Ospite</span><button type="button" class="linkbtn" id="useReg">${Object.keys(ids).some(k => !ids[k].bad) ? "Accedi con un altro giocatore" : "Usa un giocatore registrato"}</button>`;
   const un = document.getElementById("unpick"); if (un) un.onclick = () => { delete cur().pk; cur().name = ""; update(); pnameIn.focus(); };
   const ur = document.getElementById("useReg"); if (ur) ur.onclick = () => openLogin((cur().name || "").trim(), key => assignSlot(key));
   const used = state.players.slice(0, state.n).map((q, j) => j === state.active ? null : slotNameKey(q, j));
   const list = Object.keys(ids).filter(k => !ids[k].bad && !used.includes(k) && k !== p.pk).sort((a, b) => ids[a].name.localeCompare(ids[b].name, "it"));
   const sig2 = list.join("|") + "#" + state.active + "#" + (p.pk || "");
   if (box.dataset.sig === sig2) return; box.dataset.sig = sig2;
-  box.innerHTML = list.map(k => `<span class="chip"><button type="button" class="pick" data-k="${esc(k)}">${esc(ids[k].name)}</button></span>`).join("");
+  box.innerHTML = (list.length ? `<span class="chips-lab">Tocca per scegliere (senza password):</span>` : "") + list.map(k => `<span class="chip"><button type="button" class="pick" data-k="${esc(k)}">${esc(ids[k].name)}</button></span>`).join("");
   box.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { box.dataset.sig = ""; assignSlot(b.dataset.k); }));
 }
 function renderAcct() {
@@ -892,7 +903,7 @@ function renderAcct() {
     : `<div>Chi usa questo telefono? Accedi con il tuo nome per vedere tutte le partite in cui hai giocato, anche quelle salvate da altri.</div>`)
     + (others.length ? `<div class="row"><span style="color:var(--muted);font-size:.85rem">${me ? "Altri giocatori ricordati:" : "Giocatori ricordati:"}</span>${others.map(k => chip(k, "me")).join("")}</div>` : "")
     + `<div class="row"><button type="button" class="btn" id="acctLogin">${me ? "Aggiungi giocatore" : "Accedi o registrati"}</button>${me ? `<button type="button" class="btn" id="acctOut">Esci da ${esc(ids[me].name)}</button>` : ""}</div>`;
-  el.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { me = b.dataset.k; saveIds(); renderAcct(); syncNow(); }));
+  el.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { me = b.dataset.k; saveIds(); if (placeMe()) update(); renderAcct(); syncNow(); }));
   el.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => { forgetId(b.dataset.k); renderAcct(); renderChips(); }));
   document.getElementById("acctLogin").onclick = () => openLogin("", key => { if (!me) me = key; saveIds(); renderAcct(); renderChips(); });
   const out = document.getElementById("acctOut"); if (out) out.onclick = () => { me = null; saveIds(); renderAcct(); };
@@ -1087,6 +1098,7 @@ document.getElementById("syncBtn").addEventListener("click", syncNow);
 window.addEventListener("online", syncNow);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncNow(); });
 
+placeMe();
 update();
 renderAcct();
 syncNow();

@@ -273,7 +273,6 @@ body { touch-action: pan-y pinch-zoom; }
       <div class="reset">
         <button class="btn primary" id="saveBtn" type="button">Salva partita</button>
         <button class="btn" id="shareNow" type="button" hidden>Condividi</button>
-        <button class="btn" id="csvNow" type="button" hidden>CSV</button>
         <span class="saved-msg" id="savedMsg"></span>
       </div>
       <div class="reset" id="resetBox">
@@ -525,9 +524,9 @@ function curTitle() { return (state.gname || "").trim(); }
 
 const saveBtn = document.getElementById("saveBtn");
 const savedMsg = document.getElementById("savedMsg");
-const shareNow = document.getElementById("shareNow"), csvNow = document.getElementById("csvNow");
+const shareNow = document.getElementById("shareNow");
 function refreshSave() {
-  shareNow.hidden = true; csvNow.hidden = true;
+  shareNow.hidden = true;
   const gIn = document.getElementById("gname");
   if (document.activeElement !== gIn) gIn.value = state.gname || "";
   const sg = state.savedId != null ? findGame(state.savedId) : null;
@@ -538,7 +537,7 @@ function refreshSave() {
     state.savedId = null;
     saveBtn.textContent = `Salva partita #${nextNum()}`; saveBtn.disabled = false; savedMsg.textContent = "";
   } else if (sig(g.players) === sig(live) && (g.title || "") === curTitle()) {
-    saveBtn.textContent = `Partita #${g.num} salvata ✓`; saveBtn.disabled = true; savedMsg.textContent = ""; shareNow.hidden = false; csvNow.hidden = false; return;
+    saveBtn.textContent = `Partita #${g.num} salvata ✓`; saveBtn.disabled = true; savedMsg.textContent = ""; shareNow.hidden = false; return;
   } else {
     saveBtn.textContent = `Aggiorna partita #${g.num}`; saveBtn.disabled = false; savedMsg.textContent = "";
   }
@@ -594,7 +593,7 @@ function renderHist() {
     const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
     const list = [...g.players].sort((a, b) => b.score - a.score)
       .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
-    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">${esc(titleOf(g))}</span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button>${hasDet ? `<button type="button" class="share csv">CSV</button>` : ""}</span><button type="button" class="del">Elimina</button></div></div>`;
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">${esc(titleOf(g))}</span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button></span><button type="button" class="del">Elimina</button></div></div>`;
   }).join("");
   gamesEl.querySelectorAll(".share").forEach(btn => btn.addEventListener("click", () => {
     if (btn.classList.contains("dbtn")) {
@@ -603,7 +602,7 @@ function renderHist() {
       return;
     }
     const g = findGame(Number(btn.closest(".game").dataset.id)); if (!g) return;
-    if (btn.classList.contains("csv")) shareCsv(g); else shareGame(g);
+    shareCsv(g);
   }));
   gamesEl.querySelectorAll(".del").forEach(btn => btn.addEventListener("click", () => {
     if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }
@@ -628,19 +627,7 @@ vCount.addEventListener("click", () => showView(false));
 vHist.addEventListener("click", () => showView(true));
 
 /* ---------- Condividi ---------- */
-function gameText(g) {
-  const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
-  const wins = winnersOf(g);
-  const lines = [...g.players].sort((a, b) => b.score - a.score)
-    .map(p => `${wins.includes(p.name) ? "🏆 " : "     "}${p.name}: ${p.score}`);
-  return `🌾 Agricola – ${titleOf(g)} (${g.title ? `#${g.num}, ` : ""}${d})\n` + lines.join("\n") + `\n\nfabiotestai.github.io/agricola`;
-}
-async function shareGame(g) {
-  const text = gameText(g);
-  if (navigator.share) { try { await navigator.share({ text }); return; } catch (e) { if (e && e.name === "AbortError") return; } }
-  window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
-}
-shareNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareGame(g); });
+shareNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareCsv(g); });
 
 /* ---------- Tabella dettaglio partita ---------- */
 function detTable(g) {
@@ -658,13 +645,14 @@ function detTable(g) {
 /* ---------- CSV con i punti per categoria ---------- */
 function gameCsv(g) {
   const q = v => { v = String(v); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
-  const rows = [["Gruppo", "Categoria", ...g.players.map(p => p.name)]];
-  GROUPS.forEach(gr => gr.items.forEach(it => rows.push([gr.name, it.t, ...g.players.map(p => p.pts[it.id])])));
+  const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
+  const rows = [[titleOf(g), g.title ? `#${g.num} · ${d}` : d], [], ["Gruppo", "Categoria", ...g.players.map(p => p.name)]];
+  if (g.players.every(p => p.pts))
+    GROUPS.forEach(gr => gr.items.forEach(it => rows.push([gr.name, it.t, ...g.players.map(p => p.pts[it.id])])));
   rows.push(["", "TOTALE", ...g.players.map(p => p.score)]);
   return "﻿" + rows.map(r => r.map(q).join(";")).join("\r\n") + "\r\n";
 }
 async function shareCsv(g) {
-  if (!g.players.every(p => p.pts)) return;
   const name = `agricola-partita-${g.num}.csv`;
   const blob = new Blob([gameCsv(g)], { type: "text/csv" });
   const file = new File([blob], name, { type: "text/csv" });
@@ -675,7 +663,6 @@ async function shareCsv(g) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-csvNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareCsv(g); });
 
 /* ---------- Esporta / Importa ---------- */
 const nP = n => n === 1 ? "1 partita" : `${n} partite`;

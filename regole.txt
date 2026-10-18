@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null && request.auth.token.email != null
+        && request.auth.token.email.matches('.*@agricola-47def[.]firebaseapp[.]com');
+    }
+    function who() { return request.auth.token.email.split('@')[0]; }
+    function norm(n) {
+      return n.lower().replace('[àáâä]', 'a').replace('[èéêë]', 'e').replace('[ìíîï]', 'i')
+        .replace('[òóôö]', 'o').replace('[ùúûü]', 'u').replace('ñ', 'n').replace('ç', 'c')
+        .replace(' ', '.');
+    }
+
+    match /players/{key} {
+      allow get: if true;
+      allow create: if signedIn() && who() == key
+        && request.resource.data.keys().hasOnly(['name', 'uid'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.matches('[A-Za-z0-9ÀÁÂÄÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÑÇàáâäèéêëìíîïòóôöùúûüñç -]{1,20}')
+        && norm(request.resource.data.name) == key;
+    }
+
+    match /games/{id} {
+      function ok(p) { return exists(/databases/$(database)/documents/games/$(id)/ok/$(p)); }
+      function okAll(ps) {
+        return ps.size() >= 1 && ps.size() <= 4 && ok(ps[0])
+          && (ps.size() < 2 || ok(ps[1]))
+          && (ps.size() < 3 || ok(ps[2]))
+          && (ps.size() < 4 || ok(ps[3]));
+      }
+      function valid(d) {
+        return d.keys().hasOnly(['data', 'players', 'upd', 'del'])
+          && d.data is string && d.data.size() < 8000
+          && d.players is list && d.upd is int && d.del is bool
+          && who() in d.players && okAll(d.players);
+      }
+      allow read: if signedIn() && who() in resource.data.players;
+      allow create: if signedIn() && valid(request.resource.data);
+      allow update: if signedIn() && who() in resource.data.players && valid(request.resource.data);
+
+      match /ok/{p} {
+        allow create, update: if signedIn() && who() == p
+          && request.resource.data.keys().hasOnly(['at']);
+      }
+    }
+
+    match /live/{lid} {
+      function liveDoc() { return get(/databases/$(database)/documents/live/$(lid)).data; }
+      allow read: if signedIn() && who() in resource.data.players;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['host', 'players', 'order', 'title', 'gid', 'status', 'upd'])
+        && request.resource.data.host == who()
+        && request.resource.data.players is list
+        && request.resource.data.players.size() >= 2 && request.resource.data.players.size() <= 4
+        && who() in request.resource.data.players
+        && request.resource.data.order is string && request.resource.data.order.size() < 2000
+        && request.resource.data.title is string && request.resource.data.title.size() <= 40
+        && request.resource.data.gid is int && request.resource.data.upd is int
+        && request.resource.data.status == 'open';
+      allow update: if signedIn() && who() in resource.data.players
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'upd'])
+        && (request.resource.data.status == 'saved'
+            || (request.resource.data.status == 'cancelled' && resource.data.host == who()));
+
+      match /s/{p} {
+        allow read: if signedIn() && who() in liveDoc().players;
+        allow create, update: if signedIn() && who() in liveDoc().players
+          && request.resource.data.keys().hasOnly(['v', 'done', 'upd'])
+          && request.resource.data.v is string && request.resource.data.v.size() < 4000
+          && request.resource.data.done is bool && request.resource.data.upd is int
+          && (who() == p || (p.matches('g[0-3]') && liveDoc().host == who()));
+      }
+    }
+  }
+}

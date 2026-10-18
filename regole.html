@@ -1,0 +1,7 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Regole Firebase</title>
+<style>body{font:16px system-ui,sans-serif;margin:0;padding:16px;background:#141A16;color:#E5EBE2}button{font:inherit;font-weight:700;font-size:1.1rem;padding:14px 18px;border-radius:10px;border:0;background:#84B68E;color:#141A16;width:100%}pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#1D251F;padding:10px;border-radius:8px}p{color:#9AA79C}</style></head><body>
+<button id="c" type="button">Copia tutte le regole</button><p id="m">Poi incollale su Firebase al posto di tutto il resto e premi Pubblica.</p><pre id="r">Carico…</pre>
+<script>
+fetch("regole.txt",{cache:"no-store"}).then(r=>r.text()).then(t=>{document.getElementById("r").textContent=t;
+document.getElementById("c").onclick=async()=>{try{await navigator.clipboard.writeText(t);document.getElementById("m").textContent="Copiate ✓ ("+t.split("\n").length+" righe). Ora incollale su Firebase e premi Pubblica.";}catch(e){const s=getSelection(),g=document.createRange();g.selectNodeContents(document.getElementById("r"));s.removeAllRanges();s.addRange(g);document.execCommand("copy");document.getElementById("m").textContent="Copiate ✓";}};});
+</script></body></html>

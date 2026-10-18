@@ -226,6 +226,17 @@ body { touch-action: pan-y pinch-zoom; }
 @media (max-width: 380px) { .lb th, .lb td { padding: 8px 2px; font-size: 0.85rem; } .lb th { font-size: 0.62rem; letter-spacing: 0; } .lb th:last-child, .lb td:last-child { padding-right: 8px; } }
 
 .game .act-l { display: flex; gap: 6px; }
+
+.game .det { margin-top: 4px; }
+.dt-t { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; font-size: 0.88rem; }
+.dt-t th, .dt-t td { padding: 4px 3px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-t th:first-child, .dt-t td:first-child { text-align: left; width: 40%; padding-left: 0; }
+.dt-t th { font-size: 0.78rem; font-weight: 700; color: var(--ink); border-bottom: 1px solid var(--line); }
+.dt-t td.pos { color: var(--pos); }
+.dt-t td.neg { color: var(--neg); }
+.dt-t td.cat { color: var(--ink); white-space: normal; line-height: 1.15; }
+.dt-t tr.gh td { font-family: var(--font-display); color: var(--muted); font-size: 0.82rem; letter-spacing: 0.04em; padding-top: 8px; text-align: left; }
+.dt-t tr.tot td { font-weight: 700; border-top: 1px solid var(--line); padding-top: 6px; color: var(--ink); }
 </style>
 
 </head><body>
@@ -565,12 +576,18 @@ function renderHist() {
 
   gamesEl.innerHTML = [...hist.games].sort((a, b) => b.num - a.num).map(g => {
     const wins = winnersOf(g);
+    const hasDet = g.players.every(p => p.pts);
     const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
     const list = [...g.players].sort((a, b) => b.score - a.score)
       .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
-    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">Partita #${g.num}</span><span class="dt">${d}</span></div><ol>${list}</ol><div class="acts"><span class="act-l"><button type="button" class="share">Condividi</button>${g.players.every(p => p.pts) ? `<button type="button" class="share csv">CSV</button>` : ""}</span><button type="button" class="del">Elimina</button></div></div>`;
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">Partita #${g.num}</span><span class="dt">${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button>${hasDet ? `<button type="button" class="share csv">CSV</button>` : ""}</span><button type="button" class="del">Elimina</button></div></div>`;
   }).join("");
   gamesEl.querySelectorAll(".share").forEach(btn => btn.addEventListener("click", () => {
+    if (btn.classList.contains("dbtn")) {
+      const det = btn.closest(".game").querySelector(".det"); det.hidden = !det.hidden;
+      btn.setAttribute("aria-expanded", String(!det.hidden)); btn.textContent = det.hidden ? "Dettaglio" : "Chiudi";
+      return;
+    }
     const g = findGame(Number(btn.closest(".game").dataset.id)); if (!g) return;
     if (btn.classList.contains("csv")) shareCsv(g); else shareGame(g);
   }));
@@ -610,6 +627,19 @@ async function shareGame(g) {
   window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
 }
 shareNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareGame(g); });
+
+/* ---------- Tabella dettaglio partita ---------- */
+function detTable(g) {
+  const ps = g.players;
+  const cell = v => `<td class="${v > 0 ? "pos" : v < 0 ? "neg" : ""}">${v > 0 ? "+" + v : v < 0 ? "−" + Math.abs(v) : "0"}</td>`;
+  let body = "";
+  GROUPS.forEach(gr => {
+    body += `<tr class="gh"><td colspan="${ps.length + 1}">${esc(gr.name)}</td></tr>`;
+    gr.items.forEach(it => { body += `<tr><td class="cat">${esc(it.t)}</td>${ps.map(p => cell(p.pts[it.id])).join("")}</tr>`; });
+  });
+  body += `<tr class="tot"><td class="cat">Totale</td>${ps.map(p => `<td>${p.score}</td>`).join("")}</tr>`;
+  return `<table class="dt-t"><thead><tr><th></th>${ps.map(p => `<th>${esc(p.name)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+}
 
 /* ---------- CSV con i punti per categoria ---------- */
 function gameCsv(g) {

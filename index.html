@@ -297,7 +297,7 @@ body { touch-action: pan-y pinch-zoom; }
 </head><body>
 <div class="wrap">
   <header class="board">
-    <h1>Segnapunti Agricola <small id="lead"></small></h1>
+    <h1>Segnapunti Agricola</h1>
     <div class="views" role="group" aria-label="Sezione">
       <button type="button" id="vCount" aria-pressed="true">Conteggio</button>
       <button type="button" id="vHist" aria-pressed="false">Storico</button>
@@ -375,7 +375,7 @@ body { touch-action: pan-y pinch-zoom; }
         <span class="msg" id="bkMsg">Salva un file con tutte le partite (mandalo su WhatsApp o Drive). Con "Importa" lo ricarichi, anche su un altro telefono.</span>
       </div>
     </div>
-      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 22</p>
+      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 23</p>
   </section>
 </div>
 
@@ -563,15 +563,7 @@ function update() {
     tab.querySelector(".tot").innerHTML = `${totals[i]}<span>punti</span>`;
   });
   document.getElementById("count-" + state.n).checked = true;
-  const lead = document.getElementById("lead");
-  if (state.n === 1) {
-    lead.textContent = "";
-  } else {
-    const order = totals.map((t, i) => [t, i]).sort((a, b) => b[0] - a[0]);
-    const d = order[0][0] - order[1][0];
-    lead.textContent = d === 0 ? "parità in testa"
-      : `${live[order[0][1]].name || "?"} avanti di ${d}`;
-  }
+
   save();
   if (typeof renderLive === "function") renderLive();
   if (typeof refreshSave === "function") refreshSave();
@@ -786,7 +778,6 @@ function showView(h) {
   vCount.setAttribute("aria-pressed", String(!h)); vHist.setAttribute("aria-pressed", String(h));
   document.getElementById("panel").hidden = h;
   document.getElementById("tabs").hidden = h;
-  document.getElementById("lead").hidden = h;
   document.getElementById("hist").hidden = !h;
   if (h) { renderHist(); syncNow(); }
   window.scrollTo(0, 0);

@@ -252,6 +252,28 @@ body { touch-action: pan-y pinch-zoom; }
 .chip .pick { padding: 5px 4px 5px 12px; font-weight: 700; color: var(--pc); }
 .chip .rm { padding: 5px 10px 5px 6px; color: var(--muted); font-size: 0.85rem; }
 .chip button:focus-visible { outline: 2px solid var(--pc); outline-offset: -2px; }
+
+/* Accounts */
+.pstat { font-size: 0.85rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.pstat .ok { color: var(--pos); font-weight: 700; }
+.linkbtn { appearance: none; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 0.85rem; font-weight: 700; color: var(--pc, var(--field)); text-decoration: underline; cursor: pointer; }
+#pname[readonly] { background: var(--bg); }
+.acct { display: grid; gap: 8px; font-size: 0.95rem; }
+.acct .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.acct .who { font-weight: 700; color: var(--field); }
+.acct .chip .pick { color: var(--field); }
+.guest { font-size: 0.75rem; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.modal { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.45); display: grid; place-items: end center; padding: 16px; }
+.modal[hidden] { display: none; }
+.sheet { width: 100%; max-width: 420px; background: var(--surface); color: var(--ink); border-radius: 14px; padding: 16px; display: grid; gap: 6px; margin-bottom: env(safe-area-inset-bottom, 0px); }
+.sheet h2 { margin: 0 0 4px; font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--field); }
+.sheet label { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.sheet input { font: inherit; font-weight: 700; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; }
+.sheet input:focus-visible { outline: 2px solid var(--field); outline-offset: 1px; }
+.lg-msg { margin: 2px 0; min-height: 1.2em; font-size: 0.9rem; color: var(--neg); }
+.lg-msg.ok { color: var(--pos); }
+.lg-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.lg-note { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
 </style>
 
 </head><body>
@@ -283,7 +305,8 @@ body { touch-action: pan-y pinch-zoom; }
       <label for="pname">Nome giocatore</label>
       <input id="pname" type="text" maxlength="20" autocomplete="off">
       <p class="warn" id="dupWarn" role="alert" hidden></p>
-      <div class="chips" id="chips" aria-label="Giocatori salvati"></div>
+      <div class="pstat" id="pstat"></div>
+      <div class="chips" id="chips" aria-label="Giocatori registrati su questo telefono"></div>
     </div>
     <div id="groups"></div>
     <div class="foot">
@@ -312,10 +335,11 @@ body { touch-action: pan-y pinch-zoom; }
       <div class="games" id="trash"></div>
     </div>
     <div>
-      <h2>Online</h2>
+      <h2>Account</h2>
+      <div class="acct" id="acct"></div>
       <div class="backup">
         <button class="btn" id="syncBtn" type="button">Sincronizza</button>
-        <span class="msg" id="syncMsg">Le partite con gli stessi giocatori si condividono da sole.</span>
+        <span class="msg" id="syncMsg"></span>
       </div>
     </div>
     <div>
@@ -328,6 +352,23 @@ body { touch-action: pan-y pinch-zoom; }
       </div>
     </div>
   </section>
+</div>
+
+<div class="modal" id="lgModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="lgTitle">
+    <h2 id="lgTitle">Giocatore registrato</h2>
+    <label for="lgName">Nome</label>
+    <input id="lgName" type="text" maxlength="20" autocomplete="off" autocapitalize="words">
+    <label for="lgPw">Password</label>
+    <input id="lgPw" type="password" autocomplete="off">
+    <p class="lg-msg" id="lgMsg" role="alert"></p>
+    <div class="lg-row">
+      <button class="btn primary" id="lgIn" type="button">Accedi</button>
+      <button class="btn" id="lgUp" type="button">Registra nuovo</button>
+      <button class="btn" id="lgX" type="button">Annulla</button>
+    </div>
+    <p class="lg-note">Ogni nome si registra una volta sola, con una password di almeno 6 caratteri. Questo telefono ricorderà il giocatore.</p>
+  </div>
 </div>
 
 <script>
@@ -514,19 +555,44 @@ document.getElementById("count").addEventListener("change", e => {
   update();
 });
 const pnameIn = document.getElementById("pname"), dupWarn = document.getElementById("dupWarn");
-function effName(p, i) { return ((p.name || "").trim() || `Giocatore ${i + 1}`).toLowerCase(); }
+function nameKey(n) {
+  const raw = (n || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const k = raw.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ /g, ".");
+  if (/^[a-z0-9]([a-z0-9._-]{0,28}[a-z0-9])?$/.test(k) && !k.includes("..")) return k;
+  return "u" + [...new TextEncoder().encode(raw)].map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 60);
+}
+function slotKey(p, i) { return p.pk ? "@" + p.pk : "~" + nameKey((p.name || "").trim() || `Giocatore ${i + 1}`); }
+function slotNameKey(p, i) { return p.pk || nameKey((p.name || "").trim() || `Giocatore ${i + 1}`); }
 function dupOf(value) {
-  const mine = (value.trim() || `Giocatore ${state.active + 1}`).toLowerCase();
-  const i = state.players.slice(0, state.n).findIndex((p, j) => j !== state.active && effName(p, j) === mine);
+  const mine = nameKey(value.trim() || `Giocatore ${state.active + 1}`);
+  const i = state.players.slice(0, state.n).findIndex((p, j) => j !== state.active && slotNameKey(p, j) === mine);
   return i < 0 ? null : (state.players[i].name || "").trim() || `Giocatore ${i + 1}`;
 }
+const regCache = {};
+let regTimer = null;
+function guestWarn() {
+  const p = cur(); if (p.pk) { dupWarn.hidden = true; return; }
+  const k = nameKey(p.name || ""); const n = (p.name || "").trim();
+  if (n && regCache[k] === true) {
+    dupWarn.textContent = `"${n}" è un giocatore registrato: per usarlo serve la sua password.`; dupWarn.hidden = false;
+  } else dupWarn.hidden = true;
+}
+function checkRegistered(name) {
+  clearTimeout(regTimer);
+  const n = (name || "").trim(); if (!n) return;
+  const k = nameKey(n); if (k in regCache) { guestWarn(); refreshSave(); return; }
+  regTimer = setTimeout(async () => { try { regCache[k] = await isRegistered(k); } catch (e) {} guestWarn(); refreshSave(); }, 450);
+}
 pnameIn.addEventListener("input", e => {
+  if (cur().pk) return;
   const d = dupOf(e.target.value);
   if (d) { dupWarn.textContent = `"${d}" è già un altro giocatore di questa partita.`; dupWarn.hidden = false; pnameIn.setAttribute("aria-invalid", "true"); return; }
-  dupWarn.hidden = true; pnameIn.removeAttribute("aria-invalid");
-  cur().name = e.target.value; update();
+  pnameIn.removeAttribute("aria-invalid");
+  const k = nameKey(e.target.value);
+  if (ids[k] && !ids[k].bad && e.target.value.trim()) { cur().pk = k; cur().name = ids[k].name; pnameIn.blur(); update(); return; }
+  cur().name = e.target.value; guestWarn(); update(); checkRegistered(e.target.value);
 });
-pnameIn.addEventListener("blur", () => { dupWarn.hidden = true; pnameIn.removeAttribute("aria-invalid"); pnameIn.value = cur().name; });
+pnameIn.addEventListener("blur", () => { pnameIn.removeAttribute("aria-invalid"); pnameIn.value = cur().name; guestWarn(); });
 
 const resetBox = document.getElementById("resetBox");
 function showReset() {
@@ -538,8 +604,8 @@ function askReset() {
     <button class="btn danger" id="yes" type="button">Azzera</button>
     <button class="btn" id="no" type="button">Annulla</button>`;
   document.getElementById("yes").addEventListener("click", () => {
-    const names = state.players.map(p => p.name);
-    state = freshState(state.n); state.players.forEach((p, i) => p.name = names[i] || p.name);
+    const names = state.players.map(p => [p.name, p.pk]);
+    state = freshState(state.n); state.players.forEach((p, i) => { if (names[i]) { p.name = names[i][0] || p.name; if (names[i][1]) p.pk = names[i][1]; } });
     showReset(); update();
   });
   document.getElementById("no").addEventListener("click", showReset);
@@ -557,7 +623,7 @@ function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<"
 function snapshot() {
   return state.players.slice(0, state.n).map((p, i) => {
     const pts = {}; ITEMS.forEach(it => { pts[it.id] = itemScore(it, p); });
-    return { name: (p.name || "").trim() || `Giocatore ${i + 1}`, score: total(p), pts };
+    return { name: (p.name || "").trim() || `Giocatore ${i + 1}`, score: total(p), pts, ...(p.pk ? { pk: p.pk } : {}) };
   });
 }
 function sig(players) { return JSON.stringify(players); }
@@ -576,6 +642,8 @@ function refreshSave() {
   const sg = state.savedId != null ? findGame(state.savedId) : null;
   gIn.placeholder = `Partita #${sg ? sg.num : nextNum()}`;
   const live = snapshot();
+  const bad = state.players.slice(0, state.n).find(p => !p.pk && (p.name || "").trim() && regCache[nameKey(p.name)] === true);
+  if (bad) { saveBtn.textContent = "Salva partita"; saveBtn.disabled = true; savedMsg.textContent = `"${bad.name.trim()}" è registrato: serve la sua password.`; return; }
   const g = state.savedId != null ? findGame(state.savedId) : null;
   if (!g) {
     state.savedId = null;
@@ -598,9 +666,8 @@ saveBtn.addEventListener("click", () => {
     if (title) ng.title = title;
     hist.games.push(ng); hist.next = nextNum(); state.savedId = id;
   }
-  live.forEach(p => addSaved(p.name)); savePlayers();
   touch(g || findGame(state.savedId));
-  saveHist(); save(); refreshSave(); renderHist(); renderChips(); syncNow();
+  saveHist(); save(); refreshSave(); renderHist(); syncNow();
 });
 
 function winnersOf(g) {
@@ -620,18 +687,18 @@ function renderHist() {
   }
   const stats = new Map();
   [...hist.games].sort((a, b) => a.num - b.num).forEach(g => {
-    const wins = winnersOf(g).map(keyOf);
+    const wins = winnersOf(g);
     g.players.forEach(p => {
-      const k = keyOf(p.name);
-      const s = stats.get(k) || { name: p.name, games: 0, wins: 0, sum: 0, best: -Infinity };
+      const k = p.pk ? "@" + p.pk : "~" + keyOf(p.name);
+      const s = stats.get(k) || { name: p.name, guest: !p.pk && hasReg(g), games: 0, wins: 0, sum: 0, best: -Infinity };
       s.name = p.name; s.games += 1; s.sum += p.score; s.best = Math.max(s.best, p.score);
-      if (wins.includes(k)) s.wins += 1;
+      if (wins.includes(p.name)) s.wins += 1;
       stats.set(k, s);
     });
   });
   const rows = [...stats.values()].sort((a, b) => b.wins - a.wins || (b.sum / b.games) - (a.sum / a.games));
   lbBox.innerHTML = `<table class="lb"><thead><tr><th>Giocatore</th><th>Partite</th><th>Vinte</th><th>Media</th><th>Record</th></tr></thead><tbody>${
-    rows.map(r => `<tr><td class="nm">${esc(r.name)}</td><td>${r.games}</td><td class="w">${r.wins}</td><td>${(r.sum / r.games).toFixed(1).replace(".", ",")}</td><td>${r.best}</td></tr>`).join("")
+    rows.map(r => `<tr><td class="nm">${esc(r.name)}${r.guest ? `<span class="guest">ospite</span>` : ""}</td><td>${r.games}</td><td class="w">${r.wins}</td><td>${(r.sum / r.games).toFixed(1).replace(".", ",")}</td><td>${r.best}</td></tr>`).join("")
   }</tbody></table>`;
 
   gamesEl.innerHTML = [...hist.games].sort((a, b) => b.num - a.num).map(g => {
@@ -639,7 +706,7 @@ function renderHist() {
     const hasDet = g.players.every(p => p.pts);
     const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
     const list = [...g.players].sort((a, b) => b.score - a.score)
-      .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
+      .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}${!p.pk && hasReg(g) ? `<span class="guest">ospite</span>` : ""}</span><span>${p.score}</span></li>`).join("");
     return `<div class="game" data-id="${g.id}"><div class="top"><span class="ttl"><span class="num">${esc(titleOf(g))}</span><button type="button" class="ren" aria-label="Rinomina partita">✎</button></span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button></span><button type="button" class="del">Elimina</button></div></div>`;
   }).join("");
   gamesEl.querySelectorAll(".share").forEach(btn => btn.addEventListener("click", () => {
@@ -672,7 +739,7 @@ function renderHist() {
     if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }
     const id = Number(btn.closest(".game").dataset.id);
     const gone = findGame(id);
-    if (gone) { const now = Date.now(); if (gone.gk) hist.dead.push({ id, gk: gone.gk, upd: now, num: gone.num, data: gameData(gone) }); addTrash(gone, now); }
+    if (gone) { const now = Date.now(); if (gone.synced) hist.dead.push({ id, upd: now, players: regKeys(gone), data: gameData(gone) }); addTrash(gone, now, gone.synced ? gone.ok : null); }
     hist.games = hist.games.filter(g => g.id !== id);
     if (state.savedId === id) state.savedId = null;
     saveHist(); save(); refreshSave(); renderHist(); syncNow();
@@ -695,48 +762,155 @@ vHist.addEventListener("click", () => showView(true));
 /* ---------- Condividi ---------- */
 shareNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareCsv(g); });
 
-/* ---------- Giocatori salvati ---------- */
-let saved, hadList = false;
-try { hadList = localStorage.getItem("agricola-players") !== null; saved = JSON.parse(localStorage.getItem("agricola-players")); } catch (e) { saved = null; }
-if (!Array.isArray(saved)) saved = [];
-function savePlayers() { try { localStorage.setItem("agricola-players", JSON.stringify(saved)); } catch (e) {} }
-function isDefaultName(n) { return !n || /^Giocatore \d$/.test(n.trim()); }
-function addSaved(n) {
-  n = (n || "").trim(); if (isDefaultName(n)) return false;
-  if (saved.some(x => keyOf(x) === keyOf(n))) return false;
-  saved.push(n); saved.sort((a, b) => a.localeCompare(b, "it")); return true;
+/* ---------- Account dei giocatori (Firebase Auth via REST) ---------- */
+const FS_BASE = window.__FS_BASE || "https://firestore.googleapis.com/v1/projects/agricola-47def/databases/(default)/documents";
+const AUTH_BASE = window.__AUTH_BASE || "https://identitytoolkit.googleapis.com/v1";
+const STS_BASE = window.__STS_BASE || "https://securetoken.googleapis.com/v1";
+const FS_KEY = "AIzaSyCV595eqRD5-JuC51aS99Agt9tbv2ftpmE";
+const MAIL = "@agricola-47def.firebaseapp.com";
+let ids = {}; try { ids = JSON.parse(localStorage.getItem("agricola-ids")) || {}; } catch (e) { ids = {}; }
+let me = null; try { me = localStorage.getItem("agricola-me") || null; } catch (e) {}
+if (me && !ids[me]) me = null;
+function saveIds() { try { localStorage.setItem("agricola-ids", JSON.stringify(ids)); if (me) localStorage.setItem("agricola-me", me); else localStorage.removeItem("agricola-me"); } catch (e) {} }
+function hasReg(g) { return g.players.some(p => p.pk); }
+function regKeys(g) { return [...new Set(g.players.filter(p => p.pk).map(p => p.pk))]; }
+const AUTH_ERR = {
+  EMAIL_EXISTS: "Questo nome è già registrato. Se è il tuo, usa Accedi.",
+  WEAK_PASSWORD: "La password deve avere almeno 6 caratteri.",
+  INVALID_LOGIN_CREDENTIALS: "Nome o password sbagliati.", INVALID_PASSWORD: "Nome o password sbagliati.", EMAIL_NOT_FOUND: "Nome o password sbagliati.",
+  TOO_MANY_ATTEMPTS_TRY_LATER: "Troppi tentativi: riprova tra qualche minuto.",
+  OPERATION_NOT_ALLOWED: "Gli account non sono ancora attivi su Firebase.",
+  NET: "Serve la connessione a internet per verificare la password."
+};
+function authMsg(e) { const m = String(e && e.message || ""); const code = m.split(" ")[0].split(":")[0]; return AUTH_ERR[code] || (m.startsWith("WEAK_PASSWORD") ? AUTH_ERR.WEAK_PASSWORD : "Qualcosa non ha funzionato (" + m + ")."); }
+async function authCall(path, body) {
+  let r; try { r = await fetch(`${AUTH_BASE}/${path}?key=${FS_KEY}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch (e) { throw new Error("NET"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || "HTTP" + r.status);
+  return j;
 }
-if (!hadList) { hist.games.forEach(g => g.players.forEach(p => addSaved(p.name))); savePlayers(); }
+async function fsReq(method, path, body, token, qs) {
+  return fetch(`${FS_BASE}/${path}?key=${FS_KEY}${qs || ""}`, { method, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+}
+async function isRegistered(key) {
+  const r = await fsReq("GET", `players/${key}`);
+  if (r.status === 404) return false;
+  if (!r.ok) throw new Error("players " + r.status);
+  return true;
+}
+function storeId(key, name, j) {
+  ids[key] = { name, uid: j.localId, rt: j.refreshToken, it: j.idToken, exp: Date.now() + (Number(j.expiresIn) || 3600) * 1000, doc: !!(ids[key] && ids[key].doc) };
+  if (!me) me = key; saveIds();
+}
+async function ensurePlayerDoc(key) {
+  const id = ids[key]; if (!id || id.doc) return;
+  const t = await tokenFor(key);
+  const r = await fsReq("PATCH", `players/${key}`, { fields: { name: { stringValue: id.name }, uid: { stringValue: id.uid || "" } } }, t, "&currentDocument.exists=false");
+  if (r.ok || r.status === 400 || r.status === 409) { id.doc = true; saveIds(); }
+}
+async function registerPlayer(name, pw) {
+  name = name.trim().replace(/\s+/g, " "); const key = nameKey(name);
+  const j = await authCall("accounts:signUp", { email: key + MAIL, password: pw, returnSecureToken: true });
+  storeId(key, name, j); regCache[key] = true;
+  try { await ensurePlayerDoc(key); } catch (e) {}
+  return key;
+}
+async function loginPlayer(name, pw) {
+  const key = nameKey(name);
+  const j = await authCall("accounts:signInWithPassword", { email: key + MAIL, password: pw, returnSecureToken: true });
+  let disp = name.trim().replace(/\s+/g, " ");
+  try { const r = await fsReq("GET", `players/${key}`); if (r.ok) { const d = await r.json(); if (d.fields && d.fields.name) { disp = d.fields.name.stringValue; ids[key] && (ids[key].doc = true); } } } catch (e) {}
+  storeId(key, disp, j); regCache[key] = true;
+  try { await ensurePlayerDoc(key); } catch (e) {}
+  return key;
+}
+async function tokenFor(key) {
+  const id = ids[key]; if (!id) throw new Error("NOID");
+  if (id.it && id.exp > Date.now() + 60000) return id.it;
+  let r; try { r = await fetch(`${STS_BASE}/token?key=${FS_KEY}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: "grant_type=refresh_token&refresh_token=" + encodeURIComponent(id.rt) }); } catch (e) { throw new Error("NET"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { if (r.status === 400) { id.bad = true; saveIds(); } throw new Error("TOKEN"); }
+  id.it = j.id_token; id.rt = j.refresh_token || id.rt; id.exp = Date.now() + (Number(j.expires_in) || 3600) * 1000; delete id.bad; saveIds();
+  return id.it;
+}
+function forgetId(key) { delete ids[key]; if (me === key) me = null; saveIds(); }
 
+/* login sheet */
+const lgModal = document.getElementById("lgModal"), lgName = document.getElementById("lgName"), lgPw = document.getElementById("lgPw"), lgMsg = document.getElementById("lgMsg");
+let lgDone = null;
+function openLogin(prefill, done) {
+  lgDone = done; lgName.value = prefill || ""; lgPw.value = ""; lgMsg.textContent = ""; lgMsg.className = "lg-msg";
+  lgModal.hidden = false; (prefill ? lgPw : lgName).focus();
+}
+function closeLogin() { lgModal.hidden = true; lgDone = null; }
+async function lgRun(fn) {
+  const name = lgName.value.trim(), pw = lgPw.value;
+  if (!name) { lgMsg.textContent = "Scrivi il nome."; return; }
+  if (/^Giocatore \d$/i.test(name)) { lgMsg.textContent = "Scegli un nome vero."; return; }
+  if (pw.length < 6) { lgMsg.textContent = "La password deve avere almeno 6 caratteri."; return; }
+  const btns = lgModal.querySelectorAll("button"); btns.forEach(b => b.disabled = true);
+  lgMsg.className = "lg-msg ok"; lgMsg.textContent = "Controllo…";
+  try { const key = await fn(name, pw); const cb = lgDone; closeLogin(); if (cb) cb(key); renderAcct(); syncNow(); }
+  catch (e) { lgMsg.className = "lg-msg"; lgMsg.textContent = authMsg(e); }
+  finally { btns.forEach(b => b.disabled = false); }
+}
+document.getElementById("lgIn").addEventListener("click", () => lgRun(loginPlayer));
+document.getElementById("lgUp").addEventListener("click", () => lgRun(registerPlayer));
+document.getElementById("lgX").addEventListener("click", closeLogin);
+lgModal.addEventListener("click", e => { if (e.target === lgModal) closeLogin(); });
+lgPw.addEventListener("keydown", e => { if (e.key === "Enter") lgRun(loginPlayer); });
+
+function assignSlot(key) {
+  const used = state.players.slice(0, state.n).some((p, j) => j !== state.active && slotNameKey(p, j) === key);
+  if (used) { dupWarn.textContent = `"${ids[key].name}" è già un altro giocatore di questa partita.`; dupWarn.hidden = false; return; }
+  cur().pk = key; cur().name = ids[key].name; dupWarn.hidden = true; update();
+}
 function renderChips() {
-  const box = document.getElementById("chips"); if (!box) return;
-  const used = state.players.slice(0, state.n).map((p, i) => i === state.active ? null : keyOf(p.name || "")).filter(Boolean);
-  const mine = keyOf(cur().name || "");
-  const list = saved.filter(n => !used.includes(keyOf(n)) && keyOf(n) !== mine);
-  const sig2 = list.join("|") + "#" + state.active;
+  const box = document.getElementById("chips"), st = document.getElementById("pstat"); if (!box) return;
+  const p = cur();
+  pnameIn.readOnly = !!p.pk;
+  st.innerHTML = p.pk
+    ? `<span class="ok">✓ Giocatore registrato</span><button type="button" class="linkbtn" id="unpick">Cambia giocatore</button>`
+    : `<span>Ospite</span><button type="button" class="linkbtn" id="useReg">Usa un giocatore registrato</button>`;
+  const un = document.getElementById("unpick"); if (un) un.onclick = () => { delete cur().pk; cur().name = ""; update(); pnameIn.focus(); };
+  const ur = document.getElementById("useReg"); if (ur) ur.onclick = () => openLogin((cur().name || "").trim(), key => assignSlot(key));
+  const used = state.players.slice(0, state.n).map((q, j) => j === state.active ? null : slotNameKey(q, j));
+  const list = Object.keys(ids).filter(k => !ids[k].bad && !used.includes(k) && k !== p.pk).sort((a, b) => ids[a].name.localeCompare(ids[b].name, "it"));
+  const sig2 = list.join("|") + "#" + state.active + "#" + (p.pk || "");
   if (box.dataset.sig === sig2) return; box.dataset.sig = sig2;
-  box.innerHTML = list.map((n, i) => `<span class="chip"><button type="button" class="pick" data-i="${i}">${esc(n)}</button><button type="button" class="rm" data-i="${i}" aria-label="Rimuovi ${esc(n)} dalla lista">✕</button></span>`).join("");
-  box.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { cur().name = list[Number(b.dataset.i)]; box.dataset.sig = ""; update(); }));
-  box.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => {
-    const n = list[Number(b.dataset.i)];
-    saved = saved.filter(x => keyOf(x) !== keyOf(n)); savePlayers(); box.dataset.sig = ""; renderChips();
-  }));
+  box.innerHTML = list.map(k => `<span class="chip"><button type="button" class="pick" data-k="${esc(k)}">${esc(ids[k].name)}</button></span>`).join("");
+  box.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { box.dataset.sig = ""; assignSlot(b.dataset.k); }));
+}
+function renderAcct() {
+  const el = document.getElementById("acct"); if (!el) return;
+  const others = Object.keys(ids).filter(k => k !== me).sort((a, b) => ids[a].name.localeCompare(ids[b].name, "it"));
+  const chip = (k, act) => `<span class="chip"><button type="button" class="pick" data-k="${esc(k)}" data-a="${act}">${esc(ids[k].name)}</button><button type="button" class="rm" data-k="${esc(k)}" aria-label="Dimentica ${esc(ids[k].name)} su questo telefono">✕</button></span>`;
+  el.innerHTML = (me
+    ? `<div>Questo telefono è di <span class="who">${esc(ids[me].name)}</span>${ids[me].bad ? " (accesso scaduto: rientra)" : ""}. Lo storico mostra le partite in cui hai giocato.</div>`
+    : `<div>Chi usa questo telefono? Accedi con il tuo nome per vedere tutte le partite in cui hai giocato, anche quelle salvate da altri.</div>`)
+    + (others.length ? `<div class="row"><span style="color:var(--muted);font-size:.85rem">${me ? "Altri giocatori ricordati:" : "Giocatori ricordati:"}</span>${others.map(k => chip(k, "me")).join("")}</div>` : "")
+    + `<div class="row"><button type="button" class="btn" id="acctLogin">${me ? "Aggiungi giocatore" : "Accedi o registrati"}</button>${me ? `<button type="button" class="btn" id="acctOut">Esci da ${esc(ids[me].name)}</button>` : ""}</div>`;
+  el.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { me = b.dataset.k; saveIds(); renderAcct(); syncNow(); }));
+  el.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => { forgetId(b.dataset.k); renderAcct(); renderChips(); }));
+  document.getElementById("acctLogin").onclick = () => openLogin("", key => { if (!me) me = key; saveIds(); renderAcct(); renderChips(); });
+  const out = document.getElementById("acctOut"); if (out) out.onclick = () => { me = null; saveIds(); renderAcct(); };
+  if (me && ids[me].bad) openLogin(ids[me].name, () => renderAcct());
 }
 
 function gameData(g) { const { id, num, date, title, players } = g; return JSON.stringify({ id, num, date, title, players }); }
-function addTrash(game, upd) {
+function addTrash(game, upd, ok) {
   const { id, num, date, title, players } = game;
   hist.trash = hist.trash.filter(t => t.id !== id);
-  hist.trash.unshift({ id, upd: upd || Date.now(), game: { id, num, date, ...(title ? { title } : {}), players } });
+  hist.trash.unshift({ id, upd: upd || Date.now(), ...(ok && ok.length ? { ok } : {}), game: { id, num, date, ...(title ? { title } : {}), players } });
   hist.trash = hist.trash.slice(0, 30);
 }
 function restoreGame(id) {
   const t = hist.trash.find(x => x.id === id); if (!t) return;
   hist.trash = hist.trash.filter(x => x.id !== id);
-  const g = { ...t.game, upd: Date.now(), dirty: true };
+  const g = { ...t.game, upd: Date.now(), dirty: true, ...(t.ok ? { ok: t.ok, synced: true } : {}) };
   if (hist.games.some(x => x.num === g.num)) g.num = nextNum();
-  hist.games.push(g); g.players.forEach(p => addSaved(p.name));
-  saveHist(); savePlayers(); refreshSave(); renderHist(); renderChips(); syncNow();
+  hist.games.push(g);
+  saveHist(); refreshSave(); renderHist(); syncNow();
 }
 function renderTrash() {
   const box = document.getElementById("trashBox"), el = document.getElementById("trash"); if (!box) return;
@@ -813,90 +987,98 @@ impFile.addEventListener("change", async () => {
       if (!g || typeof g.num !== "number" || !Array.isArray(g.players) || have.has(g.id)) return;
       hist.games.push({ upd: Date.now(), dirty: true, id: g.id ?? Date.now() * 1000 + added, num: g.num, date: g.date || new Date().toISOString(), ...(g.title ? { title: String(g.title).slice(0, 40) } : {}),
         players: g.players.map(p => { const o = { name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0 };
-          if (p.pts && typeof p.pts === "object") { o.pts = {}; ITEMS.forEach(it => { o.pts[it.id] = Number(p.pts[it.id]) || 0; }); } return o; }) });
+          if (p.pts && typeof p.pts === "object") { o.pts = {}; ITEMS.forEach(it => { o.pts[it.id] = Number(p.pts[it.id]) || 0; }); }
+          if (typeof p.pk === "string" && p.pk.length <= 64) o.pk = p.pk; return o; }) });
       added++;
     });
     hist.next = nextNum();
-    hist.games.forEach(g => g.players.forEach(p => addSaved(p.name))); savePlayers();
-    saveHist(); refreshSave(); renderHist(); renderChips(); syncNow();
+    saveHist(); refreshSave(); renderHist(); syncNow();
     bkMsg.textContent = added ? (added === 1 ? "Importata 1 partita." : `Importate ${added} partite.`) : "Nessuna partita nuova: erano già tutte qui.";
   } catch (e) { bkMsg.textContent = "Questo file non sembra un backup del segnapunti."; }
 });
 
 /* ---------- Sincronizzazione online (Firestore, REST) ---------- */
-const FS_BASE = window.__FS_BASE || "https://firestore.googleapis.com/v1/projects/agricola-47def/databases/(default)/documents";
-const FS_KEY = "AIzaSyCV595eqRD5-JuC51aS99Agt9tbv2ftpmE";
 const syncMsg = document.getElementById("syncMsg");
 function touch(g) { if (!g) return; g.upd = Date.now(); g.dirty = true; }
-function effNames(players) { return players.map((p, i) => ((p.name || "").trim() || `Giocatore ${i + 1}`).toLowerCase()).sort(); }
-async function gkOf(players) {
-  const txt = "agricola-v1|" + effNames(players).join("|");
-  try {
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(txt));
-    return [...new Uint8Array(buf)].slice(0, 16).map(b => b.toString(16).padStart(2, "0")).join("");
-  } catch (e) { let h = 5381; for (const c of txt) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0; return "x" + h.toString(16); }
+function cleanPlayers(arr) {
+  return arr.map(p => ({ name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0,
+    ...(p.pts && typeof p.pts === "object" ? { pts: p.pts } : {}), ...(typeof p.pk === "string" && p.pk.length <= 64 ? { pk: p.pk } : {}) }));
 }
-function liveHasNames() { return state.players.slice(0, state.n).every(p => !isDefaultName((p.name || "").trim())); }
-async function fsPatch(gk, id, f) {
-  const body = { fields: { data: { stringValue: f.data }, num: { integerValue: String(f.num) }, upd: { integerValue: String(f.upd) }, del: { booleanValue: !!f.del } } };
-  const r = await fetch(`${FS_BASE}/groups/${gk}/games/${id}?key=${FS_KEY}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error("patch " + r.status);
+function gameFields(data, players, upd, del) {
+  return { fields: { data: { stringValue: data }, players: { arrayValue: { values: players.map(k => ({ stringValue: k })) } }, upd: { integerValue: String(upd) }, del: { booleanValue: !!del } } };
 }
-async function fsList(gk) {
-  let out = [], tok = "";
-  do {
-    const r = await fetch(`${FS_BASE}/groups/${gk}/games?pageSize=300&key=${FS_KEY}${tok ? "&pageToken=" + encodeURIComponent(tok) : ""}`);
-    if (!r.ok) throw new Error("list " + r.status);
-    const j = await r.json(); out = out.concat(j.documents || []); tok = j.nextPageToken || "";
-  } while (tok);
-  return out;
-}
-function mergeDoc(doc, gk) {
+function writerOf(keys) { return keys.includes(me) && ids[me] && !ids[me].bad ? me : keys.find(k => ids[k] && !ids[k].bad) || null; }
+function mergeDoc(doc) {
   const id = Number(doc.name.split("/").pop()); const f = doc.fields || {};
   const upd = Number(f.upd && f.upd.integerValue || 0); const del = !!(f.del && f.del.booleanValue);
+  const cloudKeys = ((f.players && f.players.arrayValue && f.players.arrayValue.values) || []).map(v => v.stringValue);
+  let r = null; try { r = JSON.parse(f.data && f.data.stringValue || ""); } catch (e) {}
+  const rg = r && Array.isArray(r.players) ? { id, num: Number(r.num) || 1, date: r.date || new Date().toISOString(), ...(r.title ? { title: String(r.title).slice(0, 40) } : {}), players: cleanPlayers(r.players) } : null;
   const local = findGame(id); let changed = false;
   if (del) {
-    let rg = null; try { const dd = JSON.parse(f.data && f.data.stringValue || ""); if (dd && Array.isArray(dd.players)) rg = { id, num: Number(dd.num) || 1, date: dd.date || new Date().toISOString(), ...(dd.title ? { title: String(dd.title).slice(0, 40) } : {}), players: dd.players.map(p => ({ name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0, ...(p.pts && typeof p.pts === "object" ? { pts: p.pts } : {}) })) }; } catch (e) {}
-    if (local && !local.dirty && (local.upd || 0) <= upd) { if (!rg) rg = local; hist.games = hist.games.filter(g => g.id !== id); if (state.savedId === id) state.savedId = null; changed = true; }
-    if (rg && !hist.trash.some(t => t.id === id && t.upd >= upd) && !hist.games.some(g => g.id === id)) { addTrash(rg, upd); changed = true; }
+    if (local && !local.dirty && (local.upd || 0) <= upd) { hist.games = hist.games.filter(g => g.id !== id); if (state.savedId === id) state.savedId = null; changed = true; }
+    const tg = rg || local;
+    if (tg && !hist.trash.some(t => t.id === id && t.upd >= upd) && !hist.games.some(g => g.id === id)) { addTrash(tg, upd, cloudKeys); changed = true; }
     return changed;
   }
   hist.trash = hist.trash.filter(t => t.id !== id);
-  if (hist.dead.some(d => d.id === id)) return false;
-  let r; try { r = JSON.parse(f.data.stringValue); } catch (e) { return false; }
-  if (!r || !Array.isArray(r.players)) return false;
-  const clean = { id, num: Number(r.num) || 1, date: r.date || new Date().toISOString(), players: r.players.map(p => ({ name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0, ...(p.pts && typeof p.pts === "object" ? { pts: p.pts } : {}) })), upd, gk, dirty: false, ...(r.title ? { title: String(r.title).slice(0, 40) } : {}) };
+  if (hist.dead.some(d => d.id === id) || !rg) return false;
+  const clean = { ...rg, upd, dirty: false, synced: true, ok: cloudKeys };
   if (!local) {
-    if (hist.games.some(g => g.num === clean.num)) { clean.num = nextNum(); clean.dirty = true; clean.upd = Date.now(); }
-    hist.games.push(clean); clean.players.forEach(p => addSaved(p.name)); return true;
+    if (hist.games.some(g => g.num === clean.num)) clean.num = nextNum();
+    hist.games.push(clean); return true;
   }
   if (!local.dirty && upd > (local.upd || 0)) { Object.assign(local, clean); delete local.title; if (clean.title) local.title = clean.title; return true; }
+  if (!local.synced) { local.synced = true; local.ok = cloudKeys; }
   return false;
 }
 let syncing = false, syncAgain = false;
 async function syncNow() {
   if (syncing) { syncAgain = true; return; }
   syncing = true; syncMsg.textContent = "Sincronizzo…";
+  const notes = new Set();
   try {
-    for (const g of hist.games) {
-      const gk = await gkOf(g.players);
-      if (g.gk && g.gk !== gk) { hist.dead.push({ id: g.id, gk: g.gk, upd: Date.now(), num: g.num, data: gameData(g) }); g.dirty = true; g.upd = Date.now(); }
-      g.gk = gk; if (g.upd == null) { g.upd = new Date(g.date).getTime() || Date.now(); g.dirty = true; }
+    for (const k of Object.keys(ids)) if (!ids[k].doc && !ids[k].bad) { try { await ensurePlayerDoc(k); } catch (e) {} }
+    for (const d of [...hist.dead]) {
+      const w = writerOf(d.players || []);
+      if (w) { const r = await fsReq("PATCH", `games/${d.id}`, gameFields(d.data || "", d.players, d.upd, true), await tokenFor(w)); if (!r.ok && r.status !== 403) throw new Error("del " + r.status); }
+      hist.dead = hist.dead.filter(x => x !== d);
     }
-    for (const d of [...hist.dead]) { await fsPatch(d.gk, d.id, { data: d.data || "", num: d.num || 0, upd: d.upd, del: true }); hist.dead = hist.dead.filter(x => x !== d); }
     for (const g of hist.games.filter(g => g.dirty)) {
-      const { id, num, date, title, players } = g;
-      await fsPatch(g.gk, g.id, { data: JSON.stringify({ id, num, date, title, players }), num, upd: g.upd, del: false }); g.dirty = false;
+      if (g.upd == null) g.upd = Date.now();
+      const reg = regKeys(g);
+      if (!reg.length) { g.dirty = false; continue; }                       // only guests: stays on this phone
+      g.ok = (g.ok || []).filter(k => reg.includes(k));
+      const missing = reg.filter(k => !g.ok.includes(k));
+      if (missing.some(k => !ids[k] || ids[k].bad)) { notes.add("Una partita aspetta l'accesso di un giocatore registrato su questo telefono."); continue; }
+      let blocked = false;
+      for (const p of g.players.filter(p => !p.pk)) { const k = nameKey(p.name); if (!(k in regCache)) regCache[k] = await isRegistered(k); if (regCache[k]) blocked = true; }
+      if (blocked) { notes.add("Una partita ha un ospite con il nome di un giocatore registrato: correggila."); continue; }
+      for (const k of missing) {
+        const r = await fsReq("PATCH", `games/${g.id}/ok/${k}`, { fields: { at: { integerValue: String(Date.now()) } } }, await tokenFor(k));
+        if (!r.ok) throw new Error("ok " + r.status); g.ok.push(k);
+      }
+      const w = writerOf(reg); if (!w) { notes.add("Serve l'accesso di un giocatore della partita."); continue; }
+      const r = await fsReq("PATCH", `games/${g.id}`, gameFields(gameData(g), reg, g.upd, false), await tokenFor(w));
+      if (!r.ok) throw new Error("game " + r.status);
+      g.dirty = false; g.synced = true;
     }
-    const keys = new Set(hist.games.map(g => g.gk));
-    if (liveHasNames()) keys.add(await gkOf(state.players.slice(0, state.n)));
     let changed = false;
-    for (const gk of keys) for (const doc of await fsList(gk)) if (mergeDoc(doc, gk)) changed = true;
-    savePlayers(); saveHist(); if (changed) { save(); refreshSave(); renderHist(); renderChips(); }
+    if (me && ids[me] && !ids[me].bad) {
+      const q = { structuredQuery: { from: [{ collectionId: "games" }], where: { fieldFilter: { field: { fieldPath: "players" }, op: "ARRAY_CONTAINS", value: { stringValue: me } } } } };
+      const r = await fetch(`${FS_BASE}:runQuery?key=${FS_KEY}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + await tokenFor(me) }, body: JSON.stringify(q) });
+      if (!r.ok) throw new Error("query " + r.status);
+      for (const x of await r.json()) if (x.document && mergeDoc(x.document)) changed = true;
+    }
+    saveHist(); if (changed) { save(); refreshSave(); renderHist(); }
     const t = new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
-    syncMsg.textContent = `Sincronizzato alle ${t}. Le partite con gli stessi giocatori si condividono da sole.`;
+    syncMsg.textContent = (me ? `Sincronizzato alle ${t}.` : `Partite inviate alle ${t}. Accedi per ricevere anche quelle salvate dagli altri.`) + (notes.size ? " " + [...notes].join(" ") : "");
   } catch (e) {
-    syncMsg.textContent = "Online non raggiungibile: le partite restano salvate qui e si sincronizzano appena torna la connessione.";
+    const m = String(e && e.message || "");
+    syncMsg.textContent = m === "TOKEN" ? "Un giocatore deve rientrare con la sua password." : m === "NET" || m.startsWith("Failed") || e instanceof TypeError || / 5\d\d$/.test(m)
+      ? "Online non raggiungibile: le partite restano salvate qui e partono appena torna la connessione."
+      : `Errore di sincronizzazione (${m}). Le partite restano salvate qui.`;
+    renderAcct();
   } finally { syncing = false; if (syncAgain) { syncAgain = false; syncNow(); } }
 }
 document.getElementById("syncBtn").addEventListener("click", syncNow);
@@ -904,6 +1086,7 @@ window.addEventListener("online", syncNow);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncNow(); });
 
 update();
+renderAcct();
 syncNow();
 </script>
 

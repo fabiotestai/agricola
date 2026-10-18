@@ -237,6 +237,13 @@ body { touch-action: pan-y pinch-zoom; }
 .dt-t td.cat { color: var(--ink); white-space: normal; line-height: 1.15; }
 .dt-t tr.gh td { font-family: var(--font-display); color: var(--muted); font-size: 0.82rem; letter-spacing: 0.04em; padding-top: 8px; text-align: left; }
 .dt-t tr.tot td { font-weight: 700; border-top: 1px solid var(--line); padding-top: 6px; color: var(--ink); }
+
+.game .ttl { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.game .ttl .num { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game .ren { appearance: none; border: 0; background: none; color: var(--muted); font-size: 1rem; cursor: pointer; padding: 2px 6px; line-height: 1; }
+.game .ren-in { font: inherit; font-weight: 700; color: var(--field); background: var(--bg); border: 1px solid var(--field); border-radius: 6px; padding: 4px 6px; min-width: 0; flex: 1; }
+.game .ren-ok { appearance: none; font: inherit; font-weight: 700; font-size: 0.85rem; color: var(--bg); background: var(--field); border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+.game .dt { white-space: nowrap; }
 </style>
 
 </head><body>
@@ -252,6 +259,10 @@ body { touch-action: pan-y pinch-zoom; }
 
   <main class="panel" id="panel" data-p="0" role="tabpanel">
     <div class="name-row">
+      <label for="gname">Nome partita</label>
+      <input id="gname" type="text" maxlength="40" autocomplete="off">
+    </div>
+    <div class="name-row">
       <span class="lab" id="countLab">Numero di giocatori</span>
       <div class="seg count" id="count" role="radiogroup" aria-labelledby="countLab">
         <input type="radio" name="count" id="count-1" value="1"><label for="count-1">1</label>
@@ -266,10 +277,6 @@ body { touch-action: pan-y pinch-zoom; }
     </div>
     <div id="groups"></div>
     <div class="foot">
-      <div class="name-row">
-        <label for="gname">Nome partita (facoltativo)</label>
-        <input id="gname" type="text" maxlength="40" autocomplete="off">
-      </div>
       <div class="reset">
         <button class="btn primary" id="saveBtn" type="button">Salva partita</button>
         <button class="btn" id="shareNow" type="button" hidden>Condividi</button>
@@ -593,7 +600,7 @@ function renderHist() {
     const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
     const list = [...g.players].sort((a, b) => b.score - a.score)
       .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
-    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">${esc(titleOf(g))}</span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button></span><button type="button" class="del">Elimina</button></div></div>`;
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="ttl"><span class="num">${esc(titleOf(g))}</span><button type="button" class="ren" aria-label="Rinomina partita">✎</button></span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button></span><button type="button" class="del">Elimina</button></div></div>`;
   }).join("");
   gamesEl.querySelectorAll(".share").forEach(btn => btn.addEventListener("click", () => {
     if (btn.classList.contains("dbtn")) {
@@ -603,6 +610,23 @@ function renderHist() {
     }
     const g = findGame(Number(btn.closest(".game").dataset.id)); if (!g) return;
     shareCsv(g);
+  }));
+  gamesEl.querySelectorAll(".ren").forEach(btn => btn.addEventListener("click", () => {
+    const card = btn.closest(".game"); const g = findGame(Number(card.dataset.id)); if (!g) return;
+    const ttl = card.querySelector(".ttl");
+    ttl.innerHTML = `<input class="ren-in" type="text" maxlength="40" placeholder="Partita #${g.num}" aria-label="Nome partita"><button type="button" class="ren-ok">OK</button>`;
+    const inp = ttl.querySelector("input"); inp.value = g.title || ""; inp.focus();
+    let done = false;
+    const commit = () => {
+      if (done) return; done = true;
+      const t = inp.value.trim();
+      if (t) g.title = t; else delete g.title;
+      if (state.savedId === g.id) { state.gname = g.title || ""; save(); }
+      saveHist(); refreshSave(); renderHist();
+    };
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { done = true; renderHist(); } });
+    inp.addEventListener("blur", () => setTimeout(commit, 150));
+    ttl.querySelector(".ren-ok").addEventListener("click", commit);
   }));
   gamesEl.querySelectorAll(".del").forEach(btn => btn.addEventListener("click", () => {
     if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }

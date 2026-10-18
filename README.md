@@ -1,4 +1,4 @@
-# Segnapunti Agricola
+# Agricola Scorer
 
 Calcolatore del punteggio finale di Agricola, da 1 a 4 giocatori.
 

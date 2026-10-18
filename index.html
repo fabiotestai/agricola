@@ -214,6 +214,16 @@ section.grp h2 .sub { font-family: var(--font-body); font-size: 0.85rem; font-va
 .game .share { appearance: none; border: 1px solid var(--line); background: var(--bg); color: var(--field); font: inherit; font-weight: 700; font-size: 0.85rem; border-radius: 8px; padding: 4px 10px; cursor: pointer; }
 .backup { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .backup .msg { font-size: 0.85rem; color: var(--muted); flex-basis: 100%; }
+
+/* No sideways scrolling */
+html, body { overflow-x: hidden; overflow-x: clip; overscroll-behavior-x: none; max-width: 100%; }
+body { touch-action: pan-y pinch-zoom; }
+.seg { position: relative; }
+.seg input { left: 0; top: 0; width: 1px; height: 1px; }
+.lb { table-layout: fixed; }
+.lb th:first-child, .lb td:first-child { width: 30%; }
+.lb td.nm { max-width: none; }
+@media (max-width: 380px) { .lb th, .lb td { padding: 8px 2px; font-size: 0.85rem; } .lb th { font-size: 0.62rem; letter-spacing: 0; } .lb th:last-child, .lb td:last-child { padding-right: 8px; } }
 </style>
 
 </head><body>

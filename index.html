@@ -244,6 +244,14 @@ body { touch-action: pan-y pinch-zoom; }
 .game .ren-in { font: inherit; font-weight: 700; color: var(--field); background: var(--bg); border: 1px solid var(--field); border-radius: 6px; padding: 4px 6px; min-width: 0; flex: 1; }
 .game .ren-ok { appearance: none; font: inherit; font-weight: 700; font-size: 0.85rem; color: var(--bg); background: var(--field); border: 0; border-radius: 6px; padding: 5px 10px; cursor: pointer; }
 .game .dt { white-space: nowrap; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chips:empty { display: none; }
+.chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); overflow: hidden; }
+.chip button { appearance: none; border: 0; background: none; font: inherit; cursor: pointer; color: var(--ink); }
+.chip .pick { padding: 5px 4px 5px 12px; font-weight: 700; color: var(--pc); }
+.chip .rm { padding: 5px 10px 5px 6px; color: var(--muted); font-size: 0.85rem; }
+.chip button:focus-visible { outline: 2px solid var(--pc); outline-offset: -2px; }
 </style>
 
 </head><body>
@@ -274,6 +282,7 @@ body { touch-action: pan-y pinch-zoom; }
     <div class="name-row">
       <label for="pname">Nome giocatore</label>
       <input id="pname" type="text" maxlength="20" autocomplete="off">
+      <div class="chips" id="chips" aria-label="Giocatori salvati"></div>
     </div>
     <div id="groups"></div>
     <div class="foot">
@@ -484,6 +493,7 @@ function update() {
   }
   save();
   if (typeof refreshSave === "function") refreshSave();
+  if (typeof renderChips === "function") renderChips();
 }
 
 document.getElementById("count").addEventListener("change", e => {
@@ -561,7 +571,8 @@ saveBtn.addEventListener("click", () => {
     if (title) ng.title = title;
     hist.games.push(ng); hist.next = nextNum(); state.savedId = id;
   }
-  saveHist(); save(); refreshSave(); renderHist();
+  live.forEach(p => addSaved(p.name)); savePlayers();
+  saveHist(); save(); refreshSave(); renderHist(); renderChips();
 });
 
 function winnersOf(g) {
@@ -653,6 +664,34 @@ vHist.addEventListener("click", () => showView(true));
 /* ---------- Condividi ---------- */
 shareNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareCsv(g); });
 
+/* ---------- Giocatori salvati ---------- */
+let saved, hadList = false;
+try { hadList = localStorage.getItem("agricola-players") !== null; saved = JSON.parse(localStorage.getItem("agricola-players")); } catch (e) { saved = null; }
+if (!Array.isArray(saved)) saved = [];
+function savePlayers() { try { localStorage.setItem("agricola-players", JSON.stringify(saved)); } catch (e) {} }
+function isDefaultName(n) { return !n || /^Giocatore \d$/.test(n.trim()); }
+function addSaved(n) {
+  n = (n || "").trim(); if (isDefaultName(n)) return false;
+  if (saved.some(x => keyOf(x) === keyOf(n))) return false;
+  saved.push(n); saved.sort((a, b) => a.localeCompare(b, "it")); return true;
+}
+if (!hadList) { hist.games.forEach(g => g.players.forEach(p => addSaved(p.name))); savePlayers(); }
+
+function renderChips() {
+  const box = document.getElementById("chips"); if (!box) return;
+  const used = state.players.slice(0, state.n).map((p, i) => i === state.active ? null : keyOf(p.name || "")).filter(Boolean);
+  const mine = keyOf(cur().name || "");
+  const list = saved.filter(n => !used.includes(keyOf(n)) && keyOf(n) !== mine);
+  const sig2 = list.join("|") + "#" + state.active;
+  if (box.dataset.sig === sig2) return; box.dataset.sig = sig2;
+  box.innerHTML = list.map((n, i) => `<span class="chip"><button type="button" class="pick" data-i="${i}">${esc(n)}</button><button type="button" class="rm" data-i="${i}" aria-label="Rimuovi ${esc(n)} dalla lista">✕</button></span>`).join("");
+  box.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { cur().name = list[Number(b.dataset.i)]; box.dataset.sig = ""; update(); }));
+  box.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => {
+    const n = list[Number(b.dataset.i)];
+    saved = saved.filter(x => keyOf(x) !== keyOf(n)); savePlayers(); box.dataset.sig = ""; renderChips();
+  }));
+}
+
 /* ---------- Tabella dettaglio partita ---------- */
 function detTable(g) {
   const ps = g.players;
@@ -721,7 +760,8 @@ impFile.addEventListener("change", async () => {
       added++;
     });
     hist.next = nextNum();
-    saveHist(); refreshSave(); renderHist();
+    hist.games.forEach(g => g.players.forEach(p => addSaved(p.name))); savePlayers();
+    saveHist(); refreshSave(); renderHist(); renderChips();
     bkMsg.textContent = added ? (added === 1 ? "Importata 1 partita." : `Importate ${added} partite.`) : "Nessuna partita nuova: erano già tutte qui.";
   } catch (e) { bkMsg.textContent = "Questo file non sembra un backup del segnapunti."; }
 });

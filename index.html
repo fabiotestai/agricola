@@ -308,6 +308,13 @@ body { touch-action: pan-y pinch-zoom; }
       <div class="games" id="games"></div>
     </div>
     <div>
+      <h2>Online</h2>
+      <div class="backup">
+        <button class="btn" id="syncBtn" type="button">Sincronizza</button>
+        <span class="msg" id="syncMsg">Le partite con gli stessi giocatori si condividono da sole.</span>
+      </div>
+    </div>
+    <div>
       <h2>Backup</h2>
       <div class="backup">
         <button class="btn" id="expBtn" type="button">Esporta storico</button>
@@ -539,6 +546,7 @@ document.getElementById("resetBtn").addEventListener("click", askReset);
 let hist;
 try { hist = JSON.parse(localStorage.getItem("agricola-history")); } catch (e) { hist = null; }
 if (!hist || !Array.isArray(hist.games)) hist = { next: 1, games: [] };
+if (!Array.isArray(hist.dead)) hist.dead = [];
 function saveHist() { try { localStorage.setItem("agricola-history", JSON.stringify(hist)); } catch (e) {} }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function snapshot() {
@@ -580,13 +588,14 @@ saveBtn.addEventListener("click", () => {
   const title = curTitle();
   if (g) { g.players = live; g.date = new Date().toISOString(); if (title) g.title = title; else delete g.title; }
   else {
-    const id = Date.now();
+    const id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
     const ng = { id, num: nextNum(), date: new Date().toISOString(), players: live };
     if (title) ng.title = title;
     hist.games.push(ng); hist.next = nextNum(); state.savedId = id;
   }
   live.forEach(p => addSaved(p.name)); savePlayers();
-  saveHist(); save(); refreshSave(); renderHist(); renderChips();
+  touch(g || findGame(state.savedId));
+  saveHist(); save(); refreshSave(); renderHist(); renderChips(); syncNow();
 });
 
 function winnersOf(g) {
@@ -647,7 +656,7 @@ function renderHist() {
       const t = inp.value.trim();
       if (t) g.title = t; else delete g.title;
       if (state.savedId === g.id) { state.gname = g.title || ""; save(); }
-      saveHist(); refreshSave(); renderHist();
+      touch(g); saveHist(); refreshSave(); renderHist(); syncNow();
     };
     inp.addEventListener("keydown", e => { if (e.key === "Enter") commit(); if (e.key === "Escape") { done = true; renderHist(); } });
     inp.addEventListener("blur", () => setTimeout(commit, 150));
@@ -656,9 +665,11 @@ function renderHist() {
   gamesEl.querySelectorAll(".del").forEach(btn => btn.addEventListener("click", () => {
     if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }
     const id = Number(btn.closest(".game").dataset.id);
+    const gone = findGame(id);
+    if (gone && gone.gk) hist.dead.push({ id, gk: gone.gk, upd: Date.now() });
     hist.games = hist.games.filter(g => g.id !== id);
     if (state.savedId === id) state.savedId = null;
-    saveHist(); save(); refreshSave(); renderHist();
+    saveHist(); save(); refreshSave(); renderHist(); syncNow();
   }));
 }
 
@@ -669,7 +680,7 @@ function showView(h) {
   document.getElementById("tabs").hidden = h;
   document.getElementById("lead").hidden = h;
   document.getElementById("hist").hidden = !h;
-  if (h) renderHist();
+  if (h) { renderHist(); syncNow(); }
   window.scrollTo(0, 0);
 }
 vCount.addEventListener("click", () => showView(false));
@@ -768,19 +779,94 @@ impFile.addEventListener("change", async () => {
     const have = new Set(hist.games.map(g => g.id)); let added = 0;
     data.games.forEach(g => {
       if (!g || typeof g.num !== "number" || !Array.isArray(g.players) || have.has(g.id)) return;
-      hist.games.push({ id: g.id ?? Date.now() + added, num: g.num, date: g.date || new Date().toISOString(), ...(g.title ? { title: String(g.title).slice(0, 40) } : {}),
+      hist.games.push({ upd: Date.now(), dirty: true, id: g.id ?? Date.now() * 1000 + added, num: g.num, date: g.date || new Date().toISOString(), ...(g.title ? { title: String(g.title).slice(0, 40) } : {}),
         players: g.players.map(p => { const o = { name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0 };
           if (p.pts && typeof p.pts === "object") { o.pts = {}; ITEMS.forEach(it => { o.pts[it.id] = Number(p.pts[it.id]) || 0; }); } return o; }) });
       added++;
     });
     hist.next = nextNum();
     hist.games.forEach(g => g.players.forEach(p => addSaved(p.name))); savePlayers();
-    saveHist(); refreshSave(); renderHist(); renderChips();
+    saveHist(); refreshSave(); renderHist(); renderChips(); syncNow();
     bkMsg.textContent = added ? (added === 1 ? "Importata 1 partita." : `Importate ${added} partite.`) : "Nessuna partita nuova: erano già tutte qui.";
   } catch (e) { bkMsg.textContent = "Questo file non sembra un backup del segnapunti."; }
 });
 
+/* ---------- Sincronizzazione online (Firestore, REST) ---------- */
+const FS_BASE = window.__FS_BASE || "https://firestore.googleapis.com/v1/projects/agricola-47def/databases/(default)/documents";
+const FS_KEY = "AIzaSyCV595eqRD5-JuC51aS99Agt9tbv2ftpmE";
+const syncMsg = document.getElementById("syncMsg");
+function touch(g) { if (!g) return; g.upd = Date.now(); g.dirty = true; }
+function effNames(players) { return players.map((p, i) => ((p.name || "").trim() || `Giocatore ${i + 1}`).toLowerCase()).sort(); }
+async function gkOf(players) {
+  const txt = "agricola-v1|" + effNames(players).join("|");
+  try {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(txt));
+    return [...new Uint8Array(buf)].slice(0, 16).map(b => b.toString(16).padStart(2, "0")).join("");
+  } catch (e) { let h = 5381; for (const c of txt) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0; return "x" + h.toString(16); }
+}
+function liveHasNames() { return state.players.slice(0, state.n).every(p => !isDefaultName((p.name || "").trim())); }
+async function fsPatch(gk, id, f) {
+  const body = { fields: { data: { stringValue: f.data }, num: { integerValue: String(f.num) }, upd: { integerValue: String(f.upd) }, del: { booleanValue: !!f.del } } };
+  const r = await fetch(`${FS_BASE}/groups/${gk}/games/${id}?key=${FS_KEY}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("patch " + r.status);
+}
+async function fsList(gk) {
+  let out = [], tok = "";
+  do {
+    const r = await fetch(`${FS_BASE}/groups/${gk}/games?pageSize=300&key=${FS_KEY}${tok ? "&pageToken=" + encodeURIComponent(tok) : ""}`);
+    if (!r.ok) throw new Error("list " + r.status);
+    const j = await r.json(); out = out.concat(j.documents || []); tok = j.nextPageToken || "";
+  } while (tok);
+  return out;
+}
+function mergeDoc(doc, gk) {
+  const id = Number(doc.name.split("/").pop()); const f = doc.fields || {};
+  const upd = Number(f.upd && f.upd.integerValue || 0); const del = !!(f.del && f.del.booleanValue);
+  const local = findGame(id); let changed = false;
+  if (del) { if (local && !local.dirty && (local.upd || 0) <= upd) { hist.games = hist.games.filter(g => g.id !== id); if (state.savedId === id) state.savedId = null; changed = true; } return changed; }
+  if (hist.dead.some(d => d.id === id)) return false;
+  let r; try { r = JSON.parse(f.data.stringValue); } catch (e) { return false; }
+  if (!r || !Array.isArray(r.players)) return false;
+  const clean = { id, num: Number(r.num) || 1, date: r.date || new Date().toISOString(), players: r.players.map(p => ({ name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0, ...(p.pts && typeof p.pts === "object" ? { pts: p.pts } : {}) })), upd, gk, dirty: false, ...(r.title ? { title: String(r.title).slice(0, 40) } : {}) };
+  if (!local) {
+    if (hist.games.some(g => g.num === clean.num)) { clean.num = nextNum(); clean.dirty = true; clean.upd = Date.now(); }
+    hist.games.push(clean); clean.players.forEach(p => addSaved(p.name)); return true;
+  }
+  if (!local.dirty && upd > (local.upd || 0)) { Object.assign(local, clean); delete local.title; if (clean.title) local.title = clean.title; return true; }
+  return false;
+}
+let syncing = false, syncAgain = false;
+async function syncNow() {
+  if (syncing) { syncAgain = true; return; }
+  syncing = true; syncMsg.textContent = "Sincronizzo…";
+  try {
+    for (const g of hist.games) {
+      const gk = await gkOf(g.players);
+      if (g.gk && g.gk !== gk) { hist.dead.push({ id: g.id, gk: g.gk, upd: Date.now() }); g.dirty = true; g.upd = Date.now(); }
+      g.gk = gk; if (g.upd == null) { g.upd = new Date(g.date).getTime() || Date.now(); g.dirty = true; }
+    }
+    for (const d of [...hist.dead]) { await fsPatch(d.gk, d.id, { data: "", num: 0, upd: d.upd, del: true }); hist.dead = hist.dead.filter(x => x !== d); }
+    for (const g of hist.games.filter(g => g.dirty)) {
+      const { id, num, date, title, players } = g;
+      await fsPatch(g.gk, g.id, { data: JSON.stringify({ id, num, date, title, players }), num, upd: g.upd, del: false }); g.dirty = false;
+    }
+    const keys = new Set(hist.games.map(g => g.gk));
+    if (liveHasNames()) keys.add(await gkOf(state.players.slice(0, state.n)));
+    let changed = false;
+    for (const gk of keys) for (const doc of await fsList(gk)) if (mergeDoc(doc, gk)) changed = true;
+    savePlayers(); saveHist(); if (changed) { save(); refreshSave(); renderHist(); renderChips(); }
+    const t = new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+    syncMsg.textContent = `Sincronizzato alle ${t}. Le partite con gli stessi giocatori si condividono da sole.`;
+  } catch (e) {
+    syncMsg.textContent = "Online non raggiungibile: le partite restano salvate qui e si sincronizzano appena torna la connessione.";
+  } finally { syncing = false; if (syncAgain) { syncAgain = false; syncNow(); } }
+}
+document.getElementById("syncBtn").addEventListener("click", syncNow);
+window.addEventListener("online", syncNow);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncNow(); });
+
 update();
+syncNow();
 </script>
 
 <script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(()=>{});}</script>

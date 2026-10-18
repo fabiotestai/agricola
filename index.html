@@ -351,7 +351,7 @@ body { touch-action: pan-y pinch-zoom; }
         <span class="msg" id="bkMsg">Salva un file con tutte le partite (mandalo su WhatsApp o Drive). Con "Importa" lo ricarichi, anche su un altro telefono.</span>
       </div>
     </div>
-      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 17</p>
+      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 18</p>
   </section>
 </div>
 
@@ -781,6 +781,7 @@ const AUTH_ERR = {
   INVALID_LOGIN_CREDENTIALS: "Nome o password sbagliati.", INVALID_PASSWORD: "Nome o password sbagliati.", EMAIL_NOT_FOUND: "Nome o password sbagliati.",
   TOO_MANY_ATTEMPTS_TRY_LATER: "Troppi tentativi: riprova tra qualche minuto.",
   OPERATION_NOT_ALLOWED: "Gli account non sono ancora attivi su Firebase.",
+  CONFIGURATION_NOT_FOUND: "Gli account non sono ancora attivi su Firebase (Authentication → Email/password).",
   NET: "Serve la connessione a internet per verificare la password."
 };
 function authMsg(e) { const m = String(e && e.message || ""); const code = m.split(" ")[0].split(":")[0]; return AUTH_ERR[code] || (m.startsWith("WEAK_PASSWORD") ? AUTH_ERR.WEAK_PASSWORD : "Qualcosa non ha funzionato (" + m + ")."); }

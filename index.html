@@ -224,6 +224,8 @@ body { touch-action: pan-y pinch-zoom; }
 .lb th:first-child, .lb td:first-child { width: 30%; }
 .lb td.nm { max-width: none; }
 @media (max-width: 380px) { .lb th, .lb td { padding: 8px 2px; font-size: 0.85rem; } .lb th { font-size: 0.62rem; letter-spacing: 0; } .lb th:last-child, .lb td:last-child { padding-right: 8px; } }
+
+.game .act-l { display: flex; gap: 6px; }
 </style>
 
 </head><body>
@@ -256,6 +258,7 @@ body { touch-action: pan-y pinch-zoom; }
       <div class="reset">
         <button class="btn primary" id="saveBtn" type="button">Salva partita</button>
         <button class="btn" id="shareNow" type="button" hidden>Condividi</button>
+        <button class="btn" id="csvNow" type="button" hidden>CSV</button>
         <span class="saved-msg" id="savedMsg"></span>
       </div>
       <div class="reset" id="resetBox">
@@ -494,23 +497,26 @@ if (!hist || !Array.isArray(hist.games)) hist = { next: 1, games: [] };
 function saveHist() { try { localStorage.setItem("agricola-history", JSON.stringify(hist)); } catch (e) {} }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function snapshot() {
-  return state.players.slice(0, state.n).map((p, i) => ({ name: (p.name || "").trim() || `Giocatore ${i + 1}`, score: total(p) }));
+  return state.players.slice(0, state.n).map((p, i) => {
+    const pts = {}; ITEMS.forEach(it => { pts[it.id] = itemScore(it, p); });
+    return { name: (p.name || "").trim() || `Giocatore ${i + 1}`, score: total(p), pts };
+  });
 }
 function sig(players) { return JSON.stringify(players); }
 function findGame(id) { return hist.games.find(g => g.id === id); }
 
 const saveBtn = document.getElementById("saveBtn");
 const savedMsg = document.getElementById("savedMsg");
-const shareNow = document.getElementById("shareNow");
+const shareNow = document.getElementById("shareNow"), csvNow = document.getElementById("csvNow");
 function refreshSave() {
-  shareNow.hidden = true;
+  shareNow.hidden = true; csvNow.hidden = true;
   const live = snapshot();
   const g = state.savedId != null ? findGame(state.savedId) : null;
   if (!g) {
     state.savedId = null;
     saveBtn.textContent = `Salva partita #${hist.next}`; saveBtn.disabled = false; savedMsg.textContent = "";
   } else if (sig(g.players) === sig(live)) {
-    saveBtn.textContent = `Partita #${g.num} salvata ✓`; saveBtn.disabled = true; savedMsg.textContent = ""; shareNow.hidden = false; return;
+    saveBtn.textContent = `Partita #${g.num} salvata ✓`; saveBtn.disabled = true; savedMsg.textContent = ""; shareNow.hidden = false; csvNow.hidden = false; return;
   } else {
     saveBtn.textContent = `Aggiorna partita #${g.num}`; saveBtn.disabled = false; savedMsg.textContent = "";
   }
@@ -562,10 +568,11 @@ function renderHist() {
     const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
     const list = [...g.players].sort((a, b) => b.score - a.score)
       .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
-    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">Partita #${g.num}</span><span class="dt">${d}</span></div><ol>${list}</ol><div class="acts"><button type="button" class="share">Condividi</button><button type="button" class="del">Elimina</button></div></div>`;
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">Partita #${g.num}</span><span class="dt">${d}</span></div><ol>${list}</ol><div class="acts"><span class="act-l"><button type="button" class="share">Condividi</button>${g.players.every(p => p.pts) ? `<button type="button" class="share csv">CSV</button>` : ""}</span><button type="button" class="del">Elimina</button></div></div>`;
   }).join("");
   gamesEl.querySelectorAll(".share").forEach(btn => btn.addEventListener("click", () => {
-    const g = findGame(Number(btn.closest(".game").dataset.id)); if (g) shareGame(g);
+    const g = findGame(Number(btn.closest(".game").dataset.id)); if (!g) return;
+    if (btn.classList.contains("csv")) shareCsv(g); else shareGame(g);
   }));
   gamesEl.querySelectorAll(".del").forEach(btn => btn.addEventListener("click", () => {
     if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }
@@ -604,6 +611,28 @@ async function shareGame(g) {
 }
 shareNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareGame(g); });
 
+/* ---------- CSV con i punti per categoria ---------- */
+function gameCsv(g) {
+  const q = v => { v = String(v); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  const rows = [["Gruppo", "Categoria", ...g.players.map(p => p.name)]];
+  GROUPS.forEach(gr => gr.items.forEach(it => rows.push([gr.name, it.t, ...g.players.map(p => p.pts[it.id])])));
+  rows.push(["", "TOTALE", ...g.players.map(p => p.score)]);
+  return "﻿" + rows.map(r => r.map(q).join(";")).join("\r\n") + "\r\n";
+}
+async function shareCsv(g) {
+  if (!g.players.every(p => p.pts)) return;
+  const name = `agricola-partita-${g.num}.csv`;
+  const blob = new Blob([gameCsv(g)], { type: "text/csv" });
+  const file = new File([blob], name, { type: "text/csv" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: `Agricola – Partita #${g.num}` }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+csvNow.addEventListener("click", () => { const g = findGame(state.savedId); if (g) shareCsv(g); });
+
 /* ---------- Esporta / Importa ---------- */
 const nP = n => n === 1 ? "1 partita" : `${n} partite`;
 const bkMsg = document.getElementById("bkMsg");
@@ -632,7 +661,8 @@ impFile.addEventListener("change", async () => {
     data.games.forEach(g => {
       if (!g || typeof g.num !== "number" || !Array.isArray(g.players) || have.has(g.id)) return;
       hist.games.push({ id: g.id ?? Date.now() + added, num: g.num, date: g.date || new Date().toISOString(),
-        players: g.players.map(p => ({ name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0 })) });
+        players: g.players.map(p => { const o = { name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0 };
+          if (p.pts && typeof p.pts === "object") { o.pts = {}; ITEMS.forEach(it => { o.pts[it.id] = Number(p.pts[it.id]) || 0; }); } return o; }) });
       added++;
     });
     hist.next = Math.max(hist.next, ...hist.games.map(g => g.num + 1));

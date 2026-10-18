@@ -351,6 +351,7 @@ body { touch-action: pan-y pinch-zoom; }
         <span class="msg" id="bkMsg">Salva un file con tutte le partite (mandalo su WhatsApp o Drive). Con "Importa" lo ricarichi, anche su un altro telefono.</span>
       </div>
     </div>
+      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 17</p>
   </section>
 </div>
 
@@ -1090,5 +1091,5 @@ renderAcct();
 syncNow();
 </script>
 
-<script>if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(()=>{});}</script>
+<script>if("serviceWorker" in navigator){let r=false;navigator.serviceWorker.addEventListener("controllerchange",()=>{if(r)return;r=true;location.reload();});navigator.serviceWorker.register("sw.js").then(g=>g.update()).catch(()=>{});}</script>
 </body></html>

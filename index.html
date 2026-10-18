@@ -266,6 +266,10 @@ body { touch-action: pan-y pinch-zoom; }
     </div>
     <div id="groups"></div>
     <div class="foot">
+      <div class="name-row">
+        <label for="gname">Nome partita (facoltativo)</label>
+        <input id="gname" type="text" maxlength="40" autocomplete="off">
+      </div>
       <div class="reset">
         <button class="btn primary" id="saveBtn" type="button">Salva partita</button>
         <button class="btn" id="shareNow" type="button" hidden>Condividi</button>
@@ -515,31 +519,41 @@ function snapshot() {
 }
 function sig(players) { return JSON.stringify(players); }
 function findGame(id) { return hist.games.find(g => g.id === id); }
+function nextNum() { return hist.games.length ? Math.max(...hist.games.map(g => g.num)) + 1 : 1; }
+function titleOf(g) { return g.title || `Partita #${g.num}`; }
+function curTitle() { return (state.gname || "").trim(); }
 
 const saveBtn = document.getElementById("saveBtn");
 const savedMsg = document.getElementById("savedMsg");
 const shareNow = document.getElementById("shareNow"), csvNow = document.getElementById("csvNow");
 function refreshSave() {
   shareNow.hidden = true; csvNow.hidden = true;
+  const gIn = document.getElementById("gname");
+  if (document.activeElement !== gIn) gIn.value = state.gname || "";
+  const sg = state.savedId != null ? findGame(state.savedId) : null;
+  gIn.placeholder = `Partita #${sg ? sg.num : nextNum()}`;
   const live = snapshot();
   const g = state.savedId != null ? findGame(state.savedId) : null;
   if (!g) {
     state.savedId = null;
-    saveBtn.textContent = `Salva partita #${hist.next}`; saveBtn.disabled = false; savedMsg.textContent = "";
-  } else if (sig(g.players) === sig(live)) {
+    saveBtn.textContent = `Salva partita #${nextNum()}`; saveBtn.disabled = false; savedMsg.textContent = "";
+  } else if (sig(g.players) === sig(live) && (g.title || "") === curTitle()) {
     saveBtn.textContent = `Partita #${g.num} salvata ✓`; saveBtn.disabled = true; savedMsg.textContent = ""; shareNow.hidden = false; csvNow.hidden = false; return;
   } else {
     saveBtn.textContent = `Aggiorna partita #${g.num}`; saveBtn.disabled = false; savedMsg.textContent = "";
   }
 }
+document.getElementById("gname").addEventListener("input", e => { state.gname = e.target.value; save(); refreshSave(); });
 saveBtn.addEventListener("click", () => {
   const live = snapshot();
   const g = state.savedId != null ? findGame(state.savedId) : null;
-  if (g) { g.players = live; g.date = new Date().toISOString(); }
+  const title = curTitle();
+  if (g) { g.players = live; g.date = new Date().toISOString(); if (title) g.title = title; else delete g.title; }
   else {
     const id = Date.now();
-    hist.games.push({ id, num: hist.next, date: new Date().toISOString(), players: live });
-    hist.next += 1; state.savedId = id;
+    const ng = { id, num: nextNum(), date: new Date().toISOString(), players: live };
+    if (title) ng.title = title;
+    hist.games.push(ng); hist.next = nextNum(); state.savedId = id;
   }
   saveHist(); save(); refreshSave(); renderHist();
 });
@@ -580,7 +594,7 @@ function renderHist() {
     const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
     const list = [...g.players].sort((a, b) => b.score - a.score)
       .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
-    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">Partita #${g.num}</span><span class="dt">${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button>${hasDet ? `<button type="button" class="share csv">CSV</button>` : ""}</span><button type="button" class="del">Elimina</button></div></div>`;
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">${esc(titleOf(g))}</span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${list}</ol>${hasDet ? `<div class="det" hidden>${detTable(g)}</div>` : ""}<div class="acts"><span class="act-l">${hasDet ? `<button type="button" class="share dbtn" aria-expanded="false">Dettaglio</button>` : ""}<button type="button" class="share">Condividi</button>${hasDet ? `<button type="button" class="share csv">CSV</button>` : ""}</span><button type="button" class="del">Elimina</button></div></div>`;
   }).join("");
   gamesEl.querySelectorAll(".share").forEach(btn => btn.addEventListener("click", () => {
     if (btn.classList.contains("dbtn")) {
@@ -619,7 +633,7 @@ function gameText(g) {
   const wins = winnersOf(g);
   const lines = [...g.players].sort((a, b) => b.score - a.score)
     .map(p => `${wins.includes(p.name) ? "🏆 " : "     "}${p.name}: ${p.score}`);
-  return `🌾 Agricola – Partita #${g.num} (${d})\n` + lines.join("\n") + `\n\nfabiotestai.github.io/agricola`;
+  return `🌾 Agricola – ${titleOf(g)} (${g.title ? `#${g.num}, ` : ""}${d})\n` + lines.join("\n") + `\n\nfabiotestai.github.io/agricola`;
 }
 async function shareGame(g) {
   const text = gameText(g);
@@ -655,7 +669,7 @@ async function shareCsv(g) {
   const blob = new Blob([gameCsv(g)], { type: "text/csv" });
   const file = new File([blob], name, { type: "text/csv" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: `Agricola – Partita #${g.num}` }); return; }
+    try { await navigator.share({ files: [file], title: `Agricola – ${titleOf(g)}` }); return; }
     catch (e) { if (e && e.name === "AbortError") return; }
   }
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
@@ -690,12 +704,12 @@ impFile.addEventListener("change", async () => {
     const have = new Set(hist.games.map(g => g.id)); let added = 0;
     data.games.forEach(g => {
       if (!g || typeof g.num !== "number" || !Array.isArray(g.players) || have.has(g.id)) return;
-      hist.games.push({ id: g.id ?? Date.now() + added, num: g.num, date: g.date || new Date().toISOString(),
+      hist.games.push({ id: g.id ?? Date.now() + added, num: g.num, date: g.date || new Date().toISOString(), ...(g.title ? { title: String(g.title).slice(0, 40) } : {}),
         players: g.players.map(p => { const o = { name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0 };
           if (p.pts && typeof p.pts === "object") { o.pts = {}; ITEMS.forEach(it => { o.pts[it.id] = Number(p.pts[it.id]) || 0; }); } return o; }) });
       added++;
     });
-    hist.next = Math.max(hist.next, ...hist.games.map(g => g.num + 1));
+    hist.next = nextNum();
     saveHist(); refreshSave(); renderHist();
     bkMsg.textContent = added ? (added === 1 ? "Importata 1 partita." : `Importate ${added} partite.`) : "Nessuna partita nuova: erano già tutte qui.";
   } catch (e) { bkMsg.textContent = "Questo file non sembra un backup del segnapunti."; }

@@ -175,12 +175,50 @@ section.grp h2 .sub { font-family: var(--font-body); font-size: 0.85rem; font-va
 @media (prefers-reduced-motion: no-preference) {
   .tab, .pts { transition: border-color .15s, box-shadow .15s, color .15s; }
 }
+
+/* View switch + history */
+.views { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.views button {
+  appearance: none; font: inherit; font-weight: 700; cursor: pointer; padding: 7px 8px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+}
+.views button[aria-pressed="true"] { color: var(--field); border-color: var(--field); background: var(--bg); box-shadow: inset 0 -3px 0 var(--field); }
+.views button:focus-visible { outline: 2px solid var(--field); outline-offset: 2px; }
+.btn.primary { color: var(--bg); background: var(--field); border-color: var(--field); }
+.btn:disabled { opacity: .6; cursor: default; }
+.saved-msg { font-size: 0.9rem; color: var(--pos); font-weight: 700; }
+.warn { font-size: 0.85rem; color: var(--neg); margin: 0; }
+.hist { display: grid; gap: 18px; margin-top: 6px; }
+.hist h2 { margin: 0 0 4px; font-family: var(--font-display); font-weight: 500; font-size: 1.05rem; letter-spacing: 0.05em; color: var(--muted); }
+.lb { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; font-variant-numeric: tabular-nums; }
+.lb th, .lb td { padding: 8px 6px; text-align: right; font-size: 0.92rem; }
+.lb th:first-child, .lb td:first-child { text-align: left; padding-left: 10px; }
+.lb th:last-child, .lb td:last-child { padding-right: 10px; }
+.lb th { font-size: 0.75rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+.lb tr + tr td { border-top: 1px solid var(--line); }
+.lb td.nm { font-weight: 700; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb td.w { font-weight: 700; color: var(--field); }
+.games { display: grid; gap: 8px; }
+.game { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; display: grid; gap: 4px; }
+.game .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.game .num { font-family: var(--font-display); font-weight: 700; color: var(--field); font-size: 1.05rem; }
+.game .dt { font-size: 0.8rem; color: var(--muted); }
+.game ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.game li { display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
+.game li.win { font-weight: 700; }
+.game .del { justify-self: end; appearance: none; border: 0; background: none; color: var(--muted); font: inherit; font-size: 0.8rem; cursor: pointer; padding: 2px 0; text-decoration: underline; }
+.game .del.really { color: var(--neg); font-weight: 700; }
+.empty { color: var(--muted); font-size: 0.95rem; margin: 0; }
 </style>
 
 </head><body>
 <div class="wrap">
   <header class="board">
     <h1>Segnapunti Agricola <small id="lead"></small></h1>
+    <div class="views" role="group" aria-label="Sezione">
+      <button type="button" id="vCount" aria-pressed="true">Conteggio</button>
+      <button type="button" id="vHist" aria-pressed="false">Storico</button>
+    </div>
     <div class="tabs" id="tabs" role="tablist" aria-label="Giocatori"></div>
   </header>
 
@@ -201,11 +239,27 @@ section.grp h2 .sub { font-family: var(--font-body); font-size: 0.85rem; font-va
     <div id="groups"></div>
     <div class="foot">
       <p class="note">Grano e ortaggi: conta quelli nei campi più quelli nella riserva. Le stalle contano solo se sono dentro un pascolo. I punti della Mangiatoia e simili vanno in "Punti bonus".</p>
+      <p class="warn" id="nameWarn" hidden>Metti i nomi veri dei giocatori, così la classifica li riconosce.</p>
+      <div class="reset">
+        <button class="btn primary" id="saveBtn" type="button">Salva partita</button>
+        <span class="saved-msg" id="savedMsg"></span>
+      </div>
       <div class="reset" id="resetBox">
         <button class="btn" id="resetBtn" type="button">Nuova partita</button>
       </div>
     </div>
   </main>
+
+  <section class="hist" id="hist" hidden>
+    <div>
+      <h2>Classifica</h2>
+      <div id="lbBox"></div>
+    </div>
+    <div>
+      <h2>Partite</h2>
+      <div class="games" id="games"></div>
+    </div>
+  </section>
 </div>
 
 <script>
@@ -382,6 +436,7 @@ function update() {
       : `${live[order[0][1]].name || "?"} avanti di ${d}`;
   }
   save();
+  if (typeof refreshSave === "function") refreshSave();
 }
 
 document.getElementById("count").addEventListener("change", e => {
@@ -408,6 +463,104 @@ function askReset() {
   document.getElementById("no").addEventListener("click", showReset);
 }
 document.getElementById("resetBtn").addEventListener("click", askReset);
+
+/* ---------- Storico partite ---------- */
+let hist;
+try { hist = JSON.parse(localStorage.getItem("agricola-history")); } catch (e) { hist = null; }
+if (!hist || !Array.isArray(hist.games)) hist = { next: 1, games: [] };
+function saveHist() { try { localStorage.setItem("agricola-history", JSON.stringify(hist)); } catch (e) {} }
+function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function snapshot() {
+  return state.players.slice(0, state.n).map((p, i) => ({ name: (p.name || "").trim() || `Giocatore ${i + 1}`, score: total(p) }));
+}
+function sig(players) { return JSON.stringify(players); }
+function findGame(id) { return hist.games.find(g => g.id === id); }
+
+const saveBtn = document.getElementById("saveBtn");
+const savedMsg = document.getElementById("savedMsg");
+function refreshSave() {
+  const live = snapshot();
+  document.getElementById("nameWarn").hidden = !live.some(p => /^Giocatore \d$/.test(p.name));
+  const g = state.savedId != null ? findGame(state.savedId) : null;
+  if (!g) {
+    state.savedId = null;
+    saveBtn.textContent = `Salva partita #${hist.next}`; saveBtn.disabled = false; savedMsg.textContent = "";
+  } else if (sig(g.players) === sig(live)) {
+    saveBtn.textContent = `Partita #${g.num} salvata ✓`; saveBtn.disabled = true; savedMsg.textContent = "";
+  } else {
+    saveBtn.textContent = `Aggiorna partita #${g.num}`; saveBtn.disabled = false; savedMsg.textContent = "";
+  }
+}
+saveBtn.addEventListener("click", () => {
+  const live = snapshot();
+  const g = state.savedId != null ? findGame(state.savedId) : null;
+  if (g) { g.players = live; g.date = new Date().toISOString(); }
+  else {
+    const id = Date.now();
+    hist.games.push({ id, num: hist.next, date: new Date().toISOString(), players: live });
+    hist.next += 1; state.savedId = id;
+  }
+  saveHist(); save(); refreshSave(); renderHist();
+});
+
+function winnersOf(g) {
+  const best = Math.max(...g.players.map(p => p.score));
+  return g.players.length > 1 ? g.players.filter(p => p.score === best).map(p => p.name) : [];
+}
+function keyOf(n) { return n.trim().toLowerCase(); }
+
+function renderHist() {
+  const lbBox = document.getElementById("lbBox");
+  const gamesEl = document.getElementById("games");
+  if (!hist.games.length) {
+    lbBox.innerHTML = `<p class="empty">Ancora nessuna partita salvata. A fine conteggio premi "Salva partita".</p>`;
+    gamesEl.innerHTML = "";
+    return;
+  }
+  const stats = new Map();
+  [...hist.games].sort((a, b) => a.num - b.num).forEach(g => {
+    const wins = winnersOf(g).map(keyOf);
+    g.players.forEach(p => {
+      const k = keyOf(p.name);
+      const s = stats.get(k) || { name: p.name, games: 0, wins: 0, sum: 0, best: -Infinity };
+      s.name = p.name; s.games += 1; s.sum += p.score; s.best = Math.max(s.best, p.score);
+      if (wins.includes(k)) s.wins += 1;
+      stats.set(k, s);
+    });
+  });
+  const rows = [...stats.values()].sort((a, b) => b.wins - a.wins || (b.sum / b.games) - (a.sum / a.games));
+  lbBox.innerHTML = `<table class="lb"><thead><tr><th>Giocatore</th><th>Partite</th><th>Vinte</th><th>Media</th><th>Record</th></tr></thead><tbody>${
+    rows.map(r => `<tr><td class="nm">${esc(r.name)}</td><td>${r.games}</td><td class="w">${r.wins}</td><td>${(r.sum / r.games).toFixed(1).replace(".", ",")}</td><td>${r.best}</td></tr>`).join("")
+  }</tbody></table>`;
+
+  gamesEl.innerHTML = [...hist.games].sort((a, b) => b.num - a.num).map(g => {
+    const wins = winnersOf(g);
+    const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
+    const list = [...g.players].sort((a, b) => b.score - a.score)
+      .map(p => `<li class="${wins.includes(p.name) ? "win" : ""}"><span>${wins.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("");
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">Partita #${g.num}</span><span class="dt">${d}</span></div><ol>${list}</ol><button type="button" class="del">Elimina</button></div>`;
+  }).join("");
+  gamesEl.querySelectorAll(".del").forEach(btn => btn.addEventListener("click", () => {
+    if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }
+    const id = Number(btn.closest(".game").dataset.id);
+    hist.games = hist.games.filter(g => g.id !== id);
+    if (state.savedId === id) state.savedId = null;
+    saveHist(); save(); refreshSave(); renderHist();
+  }));
+}
+
+const vCount = document.getElementById("vCount"), vHist = document.getElementById("vHist");
+function showView(h) {
+  vCount.setAttribute("aria-pressed", String(!h)); vHist.setAttribute("aria-pressed", String(h));
+  document.getElementById("panel").hidden = h;
+  document.getElementById("tabs").hidden = h;
+  document.getElementById("lead").hidden = h;
+  document.getElementById("hist").hidden = !h;
+  if (h) renderHist();
+  window.scrollTo(0, 0);
+}
+vCount.addEventListener("click", () => showView(false));
+vHist.addEventListener("click", () => showView(true));
 
 update();
 </script>

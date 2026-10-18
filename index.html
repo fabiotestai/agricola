@@ -375,7 +375,7 @@ body { touch-action: pan-y pinch-zoom; }
         <span class="msg" id="bkMsg">Salva un file con tutte le partite (mandalo su WhatsApp o Drive). Con "Importa" lo ricarichi, anche su un altro telefono.</span>
       </div>
     </div>
-      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 21</p>
+      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 22</p>
   </section>
 </div>
 
@@ -723,6 +723,7 @@ function renderHist() {
   [...hist.games].sort((a, b) => a.num - b.num).forEach(g => {
     const wins = winnersOf(g);
     g.players.forEach(p => {
+      if (!p.pk && /^Giocatore \d$/.test(p.name)) return;
       const k = p.pk ? "@" + p.pk : "~" + keyOf(p.name);
       const s = stats.get(k) || { name: p.name, guest: !p.pk && hasReg(g), games: 0, wins: 0, sum: 0, best: -Infinity };
       s.name = p.name; s.games += 1; s.sum += p.score; s.best = Math.max(s.best, p.score);
@@ -732,8 +733,8 @@ function renderHist() {
   });
   const rows = [...stats.values()].sort((a, b) => b.wins - a.wins || (b.sum / b.games) - (a.sum / a.games));
   lbBox.innerHTML = `<table class="lb"><thead><tr><th>Giocatore</th><th>Partite</th><th>Vinte</th><th>Media</th><th>Record</th></tr></thead><tbody>${
-    rows.map(r => `<tr><td class="nm">${esc(r.name)}${r.guest ? `<span class="guest">ospite</span>` : ""}</td><td>${r.games}</td><td class="w">${r.wins}</td><td>${(r.sum / r.games).toFixed(1).replace(".", ",")}</td><td>${r.best}</td></tr>`).join("")
-  }</tbody></table>`;
+    rows.map(r => `<tr><td class="nm">${esc(r.name)}${r.guest ? `<span class="guest">*</span>` : ""}</td><td>${r.games}</td><td class="w">${r.wins}</td><td>${(r.sum / r.games).toFixed(1).replace(".", ",")}</td><td>${r.best}</td></tr>`).join("")
+  }</tbody></table>${rows.some(r => r.guest) ? `<p class="empty" style="font-size:.8rem;margin:4px 0 0">* ospite</p>` : ""}`;
 
   gamesEl.innerHTML = [...hist.games].sort((a, b) => b.num - a.num).map(g => {
     const wins = winnersOf(g);

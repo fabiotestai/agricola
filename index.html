@@ -307,6 +307,10 @@ body { touch-action: pan-y pinch-zoom; }
       <h2>Partite</h2>
       <div class="games" id="games"></div>
     </div>
+    <div id="trashBox" hidden>
+      <h2>Eliminate di recente</h2>
+      <div class="games" id="trash"></div>
+    </div>
     <div>
       <h2>Online</h2>
       <div class="backup">
@@ -547,6 +551,7 @@ let hist;
 try { hist = JSON.parse(localStorage.getItem("agricola-history")); } catch (e) { hist = null; }
 if (!hist || !Array.isArray(hist.games)) hist = { next: 1, games: [] };
 if (!Array.isArray(hist.dead)) hist.dead = [];
+if (!Array.isArray(hist.trash)) hist.trash = [];
 function saveHist() { try { localStorage.setItem("agricola-history", JSON.stringify(hist)); } catch (e) {} }
 function esc(t) { return String(t).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function snapshot() {
@@ -605,6 +610,7 @@ function winnersOf(g) {
 function keyOf(n) { return n.trim().toLowerCase(); }
 
 function renderHist() {
+  renderTrash();
   const lbBox = document.getElementById("lbBox");
   const gamesEl = document.getElementById("games");
   if (!hist.games.length) {
@@ -666,7 +672,7 @@ function renderHist() {
     if (!btn.classList.contains("really")) { btn.classList.add("really"); btn.textContent = "Tocca di nuovo per eliminare"; return; }
     const id = Number(btn.closest(".game").dataset.id);
     const gone = findGame(id);
-    if (gone && gone.gk) hist.dead.push({ id, gk: gone.gk, upd: Date.now() });
+    if (gone) { const now = Date.now(); if (gone.gk) hist.dead.push({ id, gk: gone.gk, upd: now, num: gone.num, data: gameData(gone) }); addTrash(gone, now); }
     hist.games = hist.games.filter(g => g.id !== id);
     if (state.savedId === id) state.savedId = null;
     saveHist(); save(); refreshSave(); renderHist(); syncNow();
@@ -715,6 +721,32 @@ function renderChips() {
     const n = list[Number(b.dataset.i)];
     saved = saved.filter(x => keyOf(x) !== keyOf(n)); savePlayers(); box.dataset.sig = ""; renderChips();
   }));
+}
+
+function gameData(g) { const { id, num, date, title, players } = g; return JSON.stringify({ id, num, date, title, players }); }
+function addTrash(game, upd) {
+  const { id, num, date, title, players } = game;
+  hist.trash = hist.trash.filter(t => t.id !== id);
+  hist.trash.unshift({ id, upd: upd || Date.now(), game: { id, num, date, ...(title ? { title } : {}), players } });
+  hist.trash = hist.trash.slice(0, 30);
+}
+function restoreGame(id) {
+  const t = hist.trash.find(x => x.id === id); if (!t) return;
+  hist.trash = hist.trash.filter(x => x.id !== id);
+  const g = { ...t.game, upd: Date.now(), dirty: true };
+  if (hist.games.some(x => x.num === g.num)) g.num = nextNum();
+  hist.games.push(g); g.players.forEach(p => addSaved(p.name));
+  saveHist(); savePlayers(); refreshSave(); renderHist(); renderChips(); syncNow();
+}
+function renderTrash() {
+  const box = document.getElementById("trashBox"), el = document.getElementById("trash"); if (!box) return;
+  box.hidden = !hist.trash.length; if (!hist.trash.length) { el.innerHTML = ""; return; }
+  el.innerHTML = hist.trash.map(t => {
+    const g = t.game, w = winnersOf(g);
+    const d = new Date(g.date).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
+    return `<div class="game" data-id="${g.id}"><div class="top"><span class="num">${esc(titleOf(g))}</span><span class="dt">${g.title ? `#${g.num} · ` : ""}${d}</span></div><ol>${[...g.players].sort((a, b) => b.score - a.score).map(p => `<li class="${w.includes(p.name) ? "win" : ""}"><span>${w.includes(p.name) ? "🏆 " : ""}${esc(p.name)}</span><span>${p.score}</span></li>`).join("")}</ol><div class="acts"><button type="button" class="share rest">Ripristina</button></div></div>`;
+  }).join("");
+  el.querySelectorAll(".rest").forEach(b => b.addEventListener("click", () => restoreGame(Number(b.closest(".game").dataset.id))));
 }
 
 /* ---------- Tabella dettaglio partita ---------- */
@@ -823,7 +855,13 @@ function mergeDoc(doc, gk) {
   const id = Number(doc.name.split("/").pop()); const f = doc.fields || {};
   const upd = Number(f.upd && f.upd.integerValue || 0); const del = !!(f.del && f.del.booleanValue);
   const local = findGame(id); let changed = false;
-  if (del) { if (local && !local.dirty && (local.upd || 0) <= upd) { hist.games = hist.games.filter(g => g.id !== id); if (state.savedId === id) state.savedId = null; changed = true; } return changed; }
+  if (del) {
+    let rg = null; try { const dd = JSON.parse(f.data && f.data.stringValue || ""); if (dd && Array.isArray(dd.players)) rg = { id, num: Number(dd.num) || 1, date: dd.date || new Date().toISOString(), ...(dd.title ? { title: String(dd.title).slice(0, 40) } : {}), players: dd.players.map(p => ({ name: String(p.name || "?").slice(0, 20), score: Number(p.score) || 0, ...(p.pts && typeof p.pts === "object" ? { pts: p.pts } : {}) })) }; } catch (e) {}
+    if (local && !local.dirty && (local.upd || 0) <= upd) { if (!rg) rg = local; hist.games = hist.games.filter(g => g.id !== id); if (state.savedId === id) state.savedId = null; changed = true; }
+    if (rg && !hist.trash.some(t => t.id === id && t.upd >= upd) && !hist.games.some(g => g.id === id)) { addTrash(rg, upd); changed = true; }
+    return changed;
+  }
+  hist.trash = hist.trash.filter(t => t.id !== id);
   if (hist.dead.some(d => d.id === id)) return false;
   let r; try { r = JSON.parse(f.data.stringValue); } catch (e) { return false; }
   if (!r || !Array.isArray(r.players)) return false;
@@ -842,10 +880,10 @@ async function syncNow() {
   try {
     for (const g of hist.games) {
       const gk = await gkOf(g.players);
-      if (g.gk && g.gk !== gk) { hist.dead.push({ id: g.id, gk: g.gk, upd: Date.now() }); g.dirty = true; g.upd = Date.now(); }
+      if (g.gk && g.gk !== gk) { hist.dead.push({ id: g.id, gk: g.gk, upd: Date.now(), num: g.num, data: gameData(g) }); g.dirty = true; g.upd = Date.now(); }
       g.gk = gk; if (g.upd == null) { g.upd = new Date(g.date).getTime() || Date.now(); g.dirty = true; }
     }
-    for (const d of [...hist.dead]) { await fsPatch(d.gk, d.id, { data: "", num: 0, upd: d.upd, del: true }); hist.dead = hist.dead.filter(x => x !== d); }
+    for (const d of [...hist.dead]) { await fsPatch(d.gk, d.id, { data: d.data || "", num: d.num || 0, upd: d.upd, del: true }); hist.dead = hist.dead.filter(x => x !== d); }
     for (const g of hist.games.filter(g => g.dirty)) {
       const { id, num, date, title, players } = g;
       await fsPatch(g.gk, g.id, { data: JSON.stringify({ id, num, date, title, players }), num, upd: g.upd, del: false }); g.dirty = false;

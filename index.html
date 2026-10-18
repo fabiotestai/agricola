@@ -239,7 +239,6 @@ section.grp h2 .sub { font-family: var(--font-body); font-size: 0.85rem; font-va
     <div id="groups"></div>
     <div class="foot">
       <p class="note">Grano e ortaggi: conta quelli nei campi più quelli nella riserva. Le stalle contano solo se sono dentro un pascolo. I punti della Mangiatoia e simili vanno in "Punti bonus".</p>
-      <p class="warn" id="nameWarn" hidden>Metti i nomi veri dei giocatori, così la classifica li riconosce.</p>
       <div class="reset">
         <button class="btn primary" id="saveBtn" type="button">Salva partita</button>
         <span class="saved-msg" id="savedMsg"></span>
@@ -480,7 +479,6 @@ const saveBtn = document.getElementById("saveBtn");
 const savedMsg = document.getElementById("savedMsg");
 function refreshSave() {
   const live = snapshot();
-  document.getElementById("nameWarn").hidden = !live.some(p => /^Giocatore \d$/.test(p.name));
   const g = state.savedId != null ? findGame(state.savedId) : null;
   if (!g) {
     state.savedId = null;

@@ -259,7 +259,7 @@ body { touch-action: pan-y pinch-zoom; }
 .linkbtn { appearance: none; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 0.85rem; font-weight: 700; color: var(--pc, var(--field)); text-decoration: underline; cursor: pointer; }
 #pname[readonly] { background: var(--bg); }
 .acct { display: grid; gap: 8px; font-size: 0.95rem; }
-.acct .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.acct .arow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .acct .who { font-weight: 700; color: var(--field); }
 .acct .chip .pick { color: var(--field); }
 .guest { font-size: 0.75rem; color: var(--muted); font-weight: 500; margin-left: 4px; }
@@ -354,7 +354,7 @@ body { touch-action: pan-y pinch-zoom; }
         <span class="msg" id="bkMsg">Salva un file con tutte le partite (mandalo su WhatsApp o Drive). Con "Importa" lo ricarichi, anche su un altro telefono.</span>
       </div>
     </div>
-      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 19</p>
+      <p style="margin:0;font-size:.75rem;color:var(--muted);text-align:center">Versione 20</p>
   </section>
 </div>
 
@@ -559,6 +559,9 @@ document.getElementById("count").addEventListener("change", e => {
   update();
 });
 const pnameIn = document.getElementById("pname"), dupWarn = document.getElementById("dupWarn");
+const NAME_CH = "A-Za-z0-9ÀÁÂÄÈÉÊËÌÍÎÏÒÓÔÖÙÚÛÜÑÇàáâäèéêëìíîïòóôöùúûüñç -";
+const NAME_OK = new RegExp(`^[${NAME_CH}]{1,20}$`), NAME_BAD = new RegExp(`[^${NAME_CH}]`, "g");
+function cleanName(n) { return (n || "").replace(NAME_BAD, "").replace(/\s+/g, " ").slice(0, 20); }
 function nameKey(n) {
   const raw = (n || "").trim().replace(/\s+/g, " ").toLowerCase();
   const k = raw.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ /g, ".");
@@ -589,6 +592,7 @@ function checkRegistered(name) {
 }
 pnameIn.addEventListener("input", e => {
   if (cur().pk) return;
+  const cl = cleanName(e.target.value); if (cl !== e.target.value) { const pos = e.target.selectionStart - (e.target.value.length - cl.length); e.target.value = cl; try { e.target.setSelectionRange(pos, pos); } catch (x) {} }
   const d = dupOf(e.target.value);
   if (d) { dupWarn.textContent = `"${d}" è già un altro giocatore di questa partita.`; dupWarn.hidden = false; pnameIn.setAttribute("aria-invalid", "true"); return; }
   pnameIn.removeAttribute("aria-invalid");
@@ -857,8 +861,9 @@ function openLogin(prefill, done) {
 }
 function closeLogin() { lgModal.hidden = true; lgDone = null; }
 async function lgRun(fn) {
-  const name = lgName.value.trim(), pw = lgPw.value;
+  const name = lgName.value.trim().replace(/\s+/g, " "), pw = lgPw.value;
   if (!name) { lgMsg.textContent = "Scrivi il nome."; return; }
+  if (!NAME_OK.test(name) || !/[A-Za-zÀ-ÿ]/.test(name)) { lgMsg.textContent = "Nel nome usa solo lettere, numeri, spazi e trattini (massimo 20)."; return; }
   if (/^Giocatore \d$/i.test(name)) { lgMsg.textContent = "Scegli un nome vero."; return; }
   if (pw.length < 6) { lgMsg.textContent = "La password deve avere almeno 6 caratteri."; return; }
   const btns = lgModal.querySelectorAll("button"); btns.forEach(b => b.disabled = true);
@@ -872,6 +877,7 @@ document.getElementById("lgUp").addEventListener("click", () => lgRun(registerPl
 document.getElementById("lgX").addEventListener("click", closeLogin);
 lgModal.addEventListener("click", e => { if (e.target === lgModal) closeLogin(); });
 lgPw.addEventListener("keydown", e => { if (e.key === "Enter") lgRun(loginPlayer); });
+lgName.addEventListener("input", () => { const cl = cleanName(lgName.value); if (cl !== lgName.value) lgName.value = cl; });
 
 function assignSlot(key) {
   const used = state.players.slice(0, state.n).some((p, j) => j !== state.active && slotNameKey(p, j) === key);
@@ -901,8 +907,8 @@ function renderAcct() {
   el.innerHTML = (me
     ? `<div>Questo telefono è di <span class="who">${esc(ids[me].name)}</span>${ids[me].bad ? " (accesso scaduto: rientra)" : ""}. Lo storico mostra le partite in cui hai giocato.</div>`
     : `<div>Chi usa questo telefono? Accedi con il tuo nome per vedere tutte le partite in cui hai giocato, anche quelle salvate da altri.</div>`)
-    + (others.length ? `<div class="row"><span style="color:var(--muted);font-size:.85rem">${me ? "Altri giocatori ricordati:" : "Giocatori ricordati:"}</span>${others.map(k => chip(k, "me")).join("")}</div>` : "")
-    + `<div class="row"><button type="button" class="btn" id="acctLogin">${me ? "Aggiungi giocatore" : "Accedi o registrati"}</button>${me ? `<button type="button" class="btn" id="acctOut">Esci da ${esc(ids[me].name)}</button>` : ""}</div>`;
+    + (others.length ? `<div class="arow"><span style="color:var(--muted);font-size:.85rem">${me ? "Altri giocatori ricordati:" : "Giocatori ricordati:"}</span>${others.map(k => chip(k, "me")).join("")}</div>` : "")
+    + `<div class="arow"><button type="button" class="btn" id="acctLogin">${me ? "Aggiungi giocatore" : "Accedi o registrati"}</button>${me ? `<button type="button" class="btn" id="acctOut">Esci da ${esc(ids[me].name)}</button>` : ""}</div>`;
   el.querySelectorAll(".pick").forEach(b => b.addEventListener("click", () => { me = b.dataset.k; saveIds(); if (placeMe()) update(); renderAcct(); syncNow(); }));
   el.querySelectorAll(".rm").forEach(b => b.addEventListener("click", () => { forgetId(b.dataset.k); renderAcct(); renderChips(); }));
   document.getElementById("acctLogin").onclick = () => openLogin("", key => { if (!me) me = key; saveIds(); renderAcct(); renderChips(); });
